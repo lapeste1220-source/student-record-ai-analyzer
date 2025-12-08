@@ -81,7 +81,7 @@ def generate_pdf(user, analysis, books):
     table_html = df.to_html(index=False, escape=False)
 
     # ==========================
-    # 2) HTML 템플릿 (고급 디자인 적용)
+    # 2) HTML 템플릿 (최종 고급 디자인)
     # ==========================
     html = f"""
     <html>
@@ -90,98 +90,45 @@ def generate_pdf(user, analysis, books):
         <style>
             @page {{
                 size: A4;
-                margin: 25mm;
+                margin: 20mm;
             }}
 
             body {{
                 font-family: 'Noto Sans KR';
                 line-height: 1.6;
+                font-size: 13px;
             }}
 
-            h1 {{
+            /* ===== 표지 스타일 ===== */
+            .cover {{
                 text-align: center;
-                font-size: 26px;
-                margin-bottom: 30px;
+                margin-top: 120px;
+                margin-bottom: 80px;
+            }}
+
+            .cover-title {{
+                font-size: 30px;
+                font-weight: bold;
+                color: #16499A;
+            }}
+
+            .cover-sub {{
+                font-size: 18px;
+                margin-top: 15px;
+                color: #333;
+            }}
+
+            .cover-info {{
+                margin-top: 60px;
+                font-size: 16px;
+                line-height: 1.8;
             }}
 
             h2 {{
                 color: #16499A;
                 border-bottom: 2px solid #16499A;
                 padding-bottom: 4px;
-            }}
 
-            .box {{
-                border: 1px solid #ccc;
-                padding: 10px;
-                margin-bottom: 15px;
-                border-radius: 6px;
-            }}
-
-            .strength {{
-                color: #0B6EDE;
-                font-weight: bold;
-            }}
-
-            .weakness {{
-                color: #C62828;
-                font-weight: bold;
-            }}
-
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 10px;
-            }}
-
-            th, td {{
-                border: 1px solid #777;
-                padding: 8px;
-                font-size: 12px;
-            }}
-
-            th {{
-                background-color: #f0f0f0;
-            }}
-
-        </style>
-    </head>
-
-    <body>
-
-    <h1>AI 기반 학생부 분석 리포트</h1>
-
-    <h2>학생 정보</h2>
-    <div class="box">
-        <p><strong>이름:</strong> {user['name']}</p>
-        <p><strong>학교:</strong> {user['school']}</p>
-        <p><strong>지원 학년도:</strong> {user['year']}</p>
-    </div>
-
-    <h2>한 줄 요약</h2>
-    <div class="box">{analysis['summary']}</div>
-
-    <h2>강점</h2>
-    <div class="box strength">{analysis['strengths']}</div>
-
-    <h2>약점</h2>
-    <div class="box weakness">{analysis['weaknesses']}</div>
-
-    <h2>3학년 전략 제안</h2>
-    <div class="box">
-        <pre>{analysis['improvement_plan']}</pre>
-    </div>
-
-    <h2>독서활동 분석</h2>
-    {table_html}
-
-    </body>
-    </html>
-    """
-
-    pdf_bytes = io.BytesIO()
-    pisa.CreatePDF(io.StringIO(html), dest=pdf_bytes)
-
-    return pdf_bytes.getvalue()
 
 
 
