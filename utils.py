@@ -1,149 +1,208 @@
-import re
-import os
-import io
-import zipfile
-import pandas as pd
+import streamlit as st
+import pdfplumber
+import json
+from openai import OpenAI
+import streamlit.components.v1 as components
+
+from utils import (
+    parse_student_record,
+    extract_books,
+    generate_html_report,
+    admin_zip_download
+)
+from analysis import run_gpt_analysis, summarize_book
 
 
 # ==============================
-# 1) 생기부 섹션 자동 분리 엔진
+# 기본 설정
 # ==============================
-def parse_student_record(text):
+st.set_page_config(page_title="AI 생기부 분석 시스템", layout="wide")
 
-    patterns = {
-        "자율활동": r"자율활동([\s\S]*?)동아리활동",
-        "창체동아리": r"동아리활동([\s\S]*?)진로활동",
-        "진로활동": r"진로활동([\s\S]*?)창의적 체험활동상황",
-        "교과학습발달상황": r"교과학습발달상황([\s\S]*?)세부능력 및 특기사항",
-        "교과별 세부능력 특기사항": r"세부능력 및 특기사항([\s\S]*?)독서활동",
-        "독서활동": r"독서활동([\s\S]*?)행동특성 및 종합의견",
-        "행동특성및종합의견": r"행동특성 및 종합의견([\s\S]*)"
+
+# ==============================
+# 관리자 인증
+# ==============================
+st.sidebar.header("접속 인증")
+
+password = st.sidebar.text_input("접속 암호", type="password")
+
+if password != st.secrets["ADMIN_PASSWORD"]:
+    st.sidebar.warning("올바른 암호를 입력해야 시스템이 실행됩니다.")
+    st.stop()
+
+client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
+
+
+# ==============================
+# 학과 패턴 DB 로드
+# ==============================
+@st.cache_data
+def load_admit_profiles():
+    with open("config/admit_profiles.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
+admit_profiles = load_admit_profiles()
+
+
+# ==============================
+# 패턴 점수 계산
+# ==============================
+def calculate_pattern_match(student_text, major):
+
+    profile = admit_profiles.get(major, None)
+    if not profile:
+        return None
+
+    def score_keywords(keywords):
+        return sum(kw in student_text for kw in keywords) / max(len(keywords), 1)
+
+    result = {
+        "핵심역량": score_keywords(profile.get("핵심역량", [])),
+        "세특 패턴": score_keywords(profile.get("세특패턴", [])),
+        "탐구 패턴": score_keywords(profile.get("탐구·프로젝트 패턴", [])),
+        "독서 패턴": score_keywords(profile.get("독서 패턴", [])),
+        "비교과 패턴": score_keywords(profile.get("비교과 패턴", [])),
     }
 
-    result = {}
-    for key, pattern in patterns.items():
-        match = re.search(pattern, text)
-        result[key] = match.group(1).strip() if match else "(해당 항목 없음)"
+    result["총합 점수"] = (
+        result["핵심역량"] * 0.30 +
+        result["세특 패턴"] * 0.30 +
+        result["탐구 패턴"] * 0.20 +
+        result["독서 패턴"] * 0.10 +
+        result["비교과 패턴"] * 0.10
+    )
 
     return result
 
 
 # ==============================
-# 2) 독서활동 자동 추출 엔진
+# 로그인
 # ==============================
-def extract_books(text):
-    """
-    생기부 독서활동 영역에서 도서명, 저자, 학생 기록을 추출
-    예: (1학기) 1984(조지오웰) ... 내용
-    """
+if "user" not in st.session_state:
+    st.session_state.user = None
 
-    pattern = r"\)\s*(.+?)\((.+?)\)\s*(.+?)(?=\n|$)"
+if st.session_state.user is None:
+    st.title("AI 기반 생기부 분석 시스템")
 
-    books = []
-    for match in re.findall(pattern, text):
-        title = match[0].strip()
-        author = match[1].strip()
-        content = match[2].strip()
+    name = st.text_input("이름")
+    school = st.text_input("학교명")
+    year = st.number_input("학년도", value=2025)
 
-        books.append({
-            "title": title,
-            "author": author,
-            "student_note": content
-        })
+    if st.button("로그인"):
+        st.session_state.user = {"name": name, "school": school, "year": year}
 
-    return books
+    st.stop()
+
+st.sidebar.success(f"{st.session_state.user['name']}님 로그인됨")
 
 
 # ==============================
-# 3) HTML 리포트 생성 (PDF 대체)
+# 관리자 ZIP
 # ==============================
-def generate_html_report(user, analysis, books):
-
-    # --------------------------
-    # 독서활동 표 생성
-    # --------------------------
-    df = pd.DataFrame([
-        {
-            "도서명": b["title"],
-            "저자": b["author"],
-            "요약": " / ".join(b["summary"]["summary_text"]),
-            "전공 연계": " / ".join(b["summary"]["major_links"]),
-            "프로젝트 제안": " / ".join(b["summary"]["projects"])
-        }
-        for b in books
-    ])
-
-    book_table_html = df.to_html(index=False, escape=False)
-
-    # --------------------------
-    # HTML 형태로 생성
-    # --------------------------
-    html_content = f"""
-    <html>
-    <head>
-        <meta charset="UTF-8" />
-        <style>
-            body {{
-                font-family: Arial, sans-serif;
-                padding: 20px;
-                line-height: 1.6;
-            }}
-            h1, h2 {{
-                color: #16499A;
-            }}
-            .section {{
-                margin-top: 30px;
-                margin-bottom: 30px;
-            }}
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 15px;
-            }}
-            table, th, td {{
-                border: 1px solid #ccc;
-                padding: 8px;
-                text-align: left;
-            }}
-            th {{
-                background-color: #f2f2f2;
-            }}
-        </style>
-    </head>
-
-    <body>
-        <h1>AI 기반 학생부 분석 보고서</h1>
-
-        <div class="section">
-            <h2>학생 정보</h2>
-            <p><strong>이름:</strong> {user['name']}</p>
-            <p><strong>학교:</strong> {user['school']}</p>
-            <p><strong>지원 학년도:</strong> {user['year']}</p>
-        </div>
-
-        <div class="section">
-            <h2>종합 분석 결과</h2>
-            <pre>{analysis}</pre>
-        </div>
-
-        <div class="section">
-            <h2>독서활동 분석</h2>
-            {book_table_html}
-        </div>
-    </body>
-    </html>
-    """
-
-    return html_content.encode("utf-8")
+st.sidebar.subheader("관리자 메뉴")
+if st.sidebar.checkbox("ZIP 다운로드"):
+    st.title("관리자 다운로드")
+    if st.button("전체 ZIP 생성"):
+        path = admin_zip_download()
+        with open(path, "rb") as f:
+            st.download_button("ZIP 다운로드", f, file_name="all_reports.zip")
+    st.stop()
 
 
 # ==============================
-# 4) 관리자 ZIP 다운로드
+# PDF 업로드
 # ==============================
-def admin_zip_download():
-    zip_path = "all_reports.zip"
-    with zipfile.ZipFile(zip_path, "w") as z:
-        if os.path.exists("reports"):
-            for f in os.listdir("reports"):
-                z.write(f"reports/{f}")
-    return zip_path
+st.header("1. 생활기록부 PDF 업로드")
+
+uploaded_pdf = st.file_uploader("PDF 업로드", type=["pdf"])
+
+if uploaded_pdf:
+    with pdfplumber.open(uploaded_pdf) as pdf:
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+    st.session_state.raw = text
+    st.success("PDF 텍스트 추출 완료!")
+
+
+# ==============================
+# 학과 선택
+# ==============================
+st.header("2. 희망 학과 선택")
+
+all_majors = list(admit_profiles.keys())
+target_major = st.selectbox("희망 학과", all_majors)
+
+
+# ==============================
+# 분석 실행
+# ==============================
+if st.button("분석 시작"):
+
+    if "raw" not in st.session_state:
+        st.error("PDF를 먼저 업로드하세요.")
+        st.stop()
+
+    st.session_state.pattern_result = calculate_pattern_match(
+        st.session_state.raw,
+        target_major
+    )
+
+    with st.spinner("AI 분석 중..."):
+
+        sections = parse_student_record(st.session_state.raw)
+        books = extract_books(st.session_state.raw)
+
+        gpt_result = run_gpt_analysis(
+            client=client,
+            sections=sections,
+            target_univ=None,
+            target_major=target_major,
+            target_values=None
+        )
+
+        book_results = []
+        for b in books:
+            summary = summarize_book(client, b)
+            book_results.append({
+                "title": b["title"],
+                "author": b["author"],
+                "summary": summary,
+            })
+
+        st.session_state.analysis = gpt_result
+        st.session_state.books = book_results
+
+
+# ==============================
+# 분석 결과 출력
+# ==============================
+if "analysis" in st.session_state:
+
+    st.header("3. 분석 결과")
+
+    st.subheader("🎯 학과 패턴 매칭 점수")
+    st.write(st.session_state.pattern_result)
+
+    st.subheader("📝 종합 분석 결과")
+    st.write(st.session_state.analysis)
+
+    st.subheader("📚 독서활동 분석")
+    for b in st.session_state.books:
+        st.markdown(f"### 📘 {b['title']} — {b['author']}")
+        st.write("\n".join(b["summary"].get("summary_text", [])))
+        st.write("\n".join(b["summary"].get("major_links", [])))
+        st.write("\n".join(b["summary"].get("projects", [])))
+        st.markdown("---")
+
+    html_bytes = generate_html_report(
+        st.session_state.user,
+        st.session_state.analysis,
+        st.session_state.books
+    )
+
+    st.download_button(
+        "📥 HTML 리포트 다운로드",
+        html_bytes,
+        file_name="analysis_report.html",
+        mime="text/html"
+    )
