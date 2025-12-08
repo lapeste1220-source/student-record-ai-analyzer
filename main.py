@@ -123,6 +123,10 @@ if "analysis" in st.session_state:
             st.write("\n".join(b["summary"]["projects"]))
             st.markdown("---")
 
+
+    st.subheader("🧠 마인드맵 시각화")
+    display_mindmap(st.session_state.analysis["mindmap"])
+   
     # PDF 저장
     if st.button("PDF 저장"):
         pdf_bytes = generate_pdf(
