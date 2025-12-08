@@ -61,41 +61,126 @@ def extract_books(text):
 # 3) PDF 생성 (독서활동 표로 구성)
 # ==============================
 def generate_pdf(user, analysis, books):
+    import pandas as pd
+    from xhtml2pdf import pisa
 
-    # 독서활동 표 변환
+    # ==========================
+    # 1) 독서활동 표 생성
+    # ==========================
     df = pd.DataFrame([
         {
             "도서명": b["title"],
             "저자": b["author"],
-            "요약": b["summary"]["summary_text"],
-            "전공 연계": "\n".join(b["summary"]["major_links"]),
-            "프로젝트 제안": "\n".join(b["summary"]["projects"])
+            "요약": " / ".join(b["summary"]["summary_text"]),
+            "전공 연계": " / ".join(b["summary"]["major_links"]),
+            "프로젝트 제안": " / ".join(b["summary"]["projects"])
         }
         for b in books
     ])
 
+    table_html = df.to_html(index=False, escape=False)
+
+    # ==========================
+    # 2) HTML 템플릿 (고급 디자인 적용)
+    # ==========================
     html = f"""
-    <h1>AI 생기부 분석 리포트</h1>
-    <h3>{user['name']} · {user['school']} ({user['year']})</h3>
+    <html>
+    <head>
+        <meta charset="UTF-8" />
+        <style>
+            @page {{
+                size: A4;
+                margin: 25mm;
+            }}
+
+            body {{
+                font-family: 'Noto Sans KR';
+                line-height: 1.6;
+            }}
+
+            h1 {{
+                text-align: center;
+                font-size: 26px;
+                margin-bottom: 30px;
+            }}
+
+            h2 {{
+                color: #16499A;
+                border-bottom: 2px solid #16499A;
+                padding-bottom: 4px;
+            }}
+
+            .box {{
+                border: 1px solid #ccc;
+                padding: 10px;
+                margin-bottom: 15px;
+                border-radius: 6px;
+            }}
+
+            .strength {{
+                color: #0B6EDE;
+                font-weight: bold;
+            }}
+
+            .weakness {{
+                color: #C62828;
+                font-weight: bold;
+            }}
+
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 10px;
+            }}
+
+            th, td {{
+                border: 1px solid #777;
+                padding: 8px;
+                font-size: 12px;
+            }}
+
+            th {{
+                background-color: #f0f0f0;
+            }}
+
+        </style>
+    </head>
+
+    <body>
+
+    <h1>AI 기반 학생부 분석 리포트</h1>
+
+    <h2>학생 정보</h2>
+    <div class="box">
+        <p><strong>이름:</strong> {user['name']}</p>
+        <p><strong>학교:</strong> {user['school']}</p>
+        <p><strong>지원 학년도:</strong> {user['year']}</p>
+    </div>
 
     <h2>한 줄 요약</h2>
-    <p>{analysis['summary']}</p>
+    <div class="box">{analysis['summary']}</div>
 
     <h2>강점</h2>
-    <p>{analysis['strengths']}</p>
+    <div class="box strength">{analysis['strengths']}</div>
 
     <h2>약점</h2>
-    <p>{analysis['weaknesses']}</p>
+    <div class="box weakness">{analysis['weaknesses']}</div>
 
     <h2>3학년 전략 제안</h2>
-    <pre>{analysis['improvement_plan']}</pre>
+    <div class="box">
+        <pre>{analysis['improvement_plan']}</pre>
+    </div>
 
     <h2>독서활동 분석</h2>
-    {df.to_html(index=False)}
+    {table_html}
+
+    </body>
+    </html>
     """
 
     pdf_bytes = io.BytesIO()
     pisa.CreatePDF(io.StringIO(html), dest=pdf_bytes)
+
     return pdf_bytes.getvalue()
 
 
