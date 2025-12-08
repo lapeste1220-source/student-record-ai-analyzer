@@ -8,9 +8,10 @@ import streamlit.components.v1 as components
 from utils import (
     parse_student_record,
     extract_books,
-    generate_pdf,
+    generate_html_report,
     admin_zip_download
 )
+
 from analysis import run_gpt_analysis, summarize_book
 
 
@@ -21,17 +22,16 @@ st.set_page_config(page_title="AI 생기부 분석 시스템", layout="wide")
 
 
 # -------------------------------------------------------
-# 암호 입력 (선생님 전용 API 사용을 위한 보안절차)
+# 암호 입력 (선생님 전용 보안)
 # -------------------------------------------------------
 st.sidebar.header("접속 인증")
-
 password = st.sidebar.text_input("접속 암호 입력", type="password")
 
 if password != st.secrets["ADMIN_PASSWORD"]:
     st.sidebar.warning("올바른 암호를 입력해야 시스템이 활성화됩니다.")
     st.stop()
 
-# 암호가 맞는 경우 OpenAI 클라이언트 로드
+# 암호가 맞으면 OpenAI 클라이언트 활성화
 client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
 
 
@@ -85,7 +85,6 @@ def display_mindmap(mindmap_json):
     net = Network(height="600px", width="100%", bgcolor="#FFFFFF", font_color="black")
     net.add_node("학생부 핵심구조", shape="ellipse", color="#FFB347")
 
-    # 1차 노드
     keys = ["summary", "strengths", "weaknesses", "activities"]
     colors = ["#77DD77", "#AEC6CF", "#FF6961", "#FDFD96"]
     labels = ["요약", "강점", "약점", "활동"]
@@ -112,13 +111,11 @@ def display_mindmap(mindmap_json):
     for key, items in data["activities"].items():
         net.add_node(key, color="#FFF380")
         net.add_edge("활동", key)
-
         for item in items:
             net.add_node(item, shape="box")
             net.add_edge(key, item)
 
-    html = net.generate_html("mindmap.html")
-    return html
+    return net.generate_html("mindmap.html")
 
 
 # -------------------------------------------------------
@@ -148,10 +145,12 @@ st.sidebar.success(f"{st.session_state.user['name']}님 로그인됨")
 st.sidebar.subheader("관리자 도구")
 if st.sidebar.checkbox("관리자 ZIP 다운로드"):
     st.title("관리자 페이지")
+
     if st.button("전체 ZIP 다운로드"):
         zip_path = admin_zip_download()
         with open(zip_path, "rb") as z:
             st.download_button("ZIP 다운로드", z, file_name="all_reports.zip")
+
     st.stop()
 
 
@@ -170,7 +169,7 @@ if uploaded_pdf:
 
 
 # -------------------------------------------------------
-# 조건 입력
+# 희망 대학/학과 입력
 # -------------------------------------------------------
 st.header("2. 희망 대학·학과 입력")
 
@@ -241,17 +240,17 @@ if "analysis" in st.session_state:
     html = display_mindmap(st.session_state.analysis["mindmap"])
     components.html(html, height=650, scrolling=True)
 
-    if st.button("PDF 저장"):
-    html_bytes = generate_html_report(
-        st.session_state.user,
-        st.session_state.analysis,
-        st.session_state.books
-    )
+    # HTML 리포트 다운로드
+    if st.button("리포트 저장 (HTML)"):
+        html_bytes = generate_html_report(
+            st.session_state.user,
+            st.session_state.analysis,
+            st.session_state.books
+        )
 
-    st.download_button(
-        "📥 HTML 리포트 다운로드",
-        html_bytes,
-        file_name="analysis_report.html",
-        mime="text/html"
-    )
-
+        st.download_button(
+            "📥 HTML 리포트 다운로드",
+            html_bytes,
+            file_name="analysis_report.html",
+            mime="text/html"
+        )
