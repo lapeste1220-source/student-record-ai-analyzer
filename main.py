@@ -131,3 +131,68 @@ if "analysis" in st.session_state:
             st.session_state.books
         )
         st.download_button("PDF 다운로드", pdf_bytes, file_name="analysis.pdf")
+from pyvis.network import Network
+import json
+import streamlit.components.v1 as components
+
+
+def display_mindmap(mindmap_json):
+    """
+    GPT가 생성한 마인드맵 JSON을 pyvis 네트워크 그래프로 렌더링
+    """
+
+    # JSON 문자열을 dict로 변환
+    data = json.loads(mindmap_json)
+
+    net = Network(height="600px", width="100%", bgcolor="#FFFFFF", font_color="black")
+
+    net.add_node("학생부 핵심구조", shape="ellipse", color="#FFB347")
+
+    # 1차 노드: summary, strengths, weaknesses, activities
+    net.add_node("요약", color="#77DD77")
+    net.add_edge("학생부 핵심구조", "요약")
+
+    net.add_node("강점", color="#AEC6CF")
+    net.add_edge("학생부 핵심구조", "강점")
+
+    net.add_node("약점", color="#FF6961")
+    net.add_edge("학생부 핵심구조", "약점")
+
+    net.add_node("활동", color="#FDFD96")
+    net.add_edge("학생부 핵심구조", "활동")
+
+    # summary
+    net.add_node(data["summary"], shape="box")
+    net.add_edge("요약", data["summary"])
+
+    # strengths
+    for s in data["strengths"]:
+        net.add_node(s, color="#ADD8E6")
+        net.add_edge("강점", s)
+
+    # weaknesses
+    for w in data["weaknesses"]:
+        net.add_node(w, color="#FFB6B6")
+        net.add_edge("약점", w)
+
+    # activities
+    for key, items in data["activities"].items():
+        net.add_node(key, color="#FFF380")
+        net.add_edge("활동", key)
+
+        for item in items:
+            net.add_node(item, shape="box")
+            net.add_edge(key, item)
+
+    # HTML 생성
+    net.set_options('''
+        var options = {
+          "edges": {"smooth": false},
+          "physics": {"enabled": true}
+        }
+    ''')
+
+    html = net.generate_html("mindmap.html")
+
+    # Streamlit에 표시
+    components.html(html, height=650, scrolling=True)
