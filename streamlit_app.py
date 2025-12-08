@@ -2,7 +2,6 @@ import streamlit as st
 import pdfplumber
 from openai import OpenAI
 import json
-from pyvis.network import Network
 import streamlit.components.v1 as components
 
 from utils import (
@@ -74,48 +73,6 @@ def calculate_pattern_match(student_text, university, major):
     )
 
     return result
-
-
-# -------------------------------------------------------
-# 마인드맵 시각화 함수
-# -------------------------------------------------------
-def display_mindmap(mindmap_json):
-    data = json.loads(mindmap_json)
-
-    net = Network(height="600px", width="100%", bgcolor="#FFFFFF", font_color="black")
-    net.add_node("학생부 핵심구조", shape="ellipse", color="#FFB347")
-
-    keys = ["summary", "strengths", "weaknesses", "activities"]
-    colors = ["#77DD77", "#AEC6CF", "#FF6961", "#FDFD96"]
-    labels = ["요약", "강점", "약점", "활동"]
-
-    for label, key, color in zip(labels, keys, colors):
-        net.add_node(label, color=color)
-        net.add_edge("학생부 핵심구조", label)
-
-    # summary
-    net.add_node(data["summary"], shape="box")
-    net.add_edge("요약", data["summary"])
-
-    # strengths
-    for s in data["strengths"]:
-        net.add_node(s, color="#ADD8E6")
-        net.add_edge("강점", s)
-
-    # weaknesses
-    for w in data["weaknesses"]:
-        net.add_node(w, color="#FFB6B6")
-        net.add_edge("약점", w)
-
-    # activities
-    for key, items in data["activities"].items():
-        net.add_node(key, color="#FFF380")
-        net.add_edge("활동", key)
-        for item in items:
-            net.add_node(item, shape="box")
-            net.add_edge(key, item)
-
-    return net.generate_html("mindmap.html")
 
 
 # -------------------------------------------------------
@@ -235,10 +192,6 @@ if "analysis" in st.session_state:
         st.write("**프로젝트 제안:**")
         st.write("\n".join(b["summary"]["projects"]))
         st.markdown("---")
-
-    st.subheader("🧠 마인드맵 시각화")
-    html = display_mindmap(st.session_state.analysis["mindmap"])
-    components.html(html, height=650, scrolling=True)
 
     # HTML 리포트 다운로드
     if st.button("리포트 저장 (HTML)"):
