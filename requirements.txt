@@ -1,8 +1,4 @@
 streamlit
 pdfplumber
-PyMuPDF
 openai
-xhtml2pdf
-pandas
-numpy
 pyvis
