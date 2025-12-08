@@ -1,0 +1,11 @@
+ai-student-record-consulting/
+│
+├── main.py
+├── analysis.py
+├── utils.py
+├── requirements.txt
+│
+├── config/
+│   └── univ_data.json
+│
+└── reports/
