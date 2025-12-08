@@ -5,24 +5,39 @@ import json
 from pyvis.network import Network
 import streamlit.components.v1 as components
 
-from utils import parse_student_record, extract_books, generate_pdf, admin_zip_download
+from utils import (
+    parse_student_record,
+    extract_books,
+    generate_pdf,
+    admin_zip_download
+)
 from analysis import run_gpt_analysis, summarize_book
 
 
-# -------------------------
-# Streamlit 설정
-# -------------------------
+# -------------------------------------------------------
+# Streamlit 기본 설정
+# -------------------------------------------------------
 st.set_page_config(page_title="AI 생기부 분석 시스템", layout="wide")
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+
+# -------------------------------------------------------
+# 암호 입력 (선생님 전용 API 사용을 위한 보안절차)
+# -------------------------------------------------------
+st.sidebar.header("접속 인증")
+
+password = st.sidebar.text_input("접속 암호 입력", type="password")
 
 if password != st.secrets["ADMIN_PASSWORD"]:
-    st.error("잘못된 암호입니다.")
+    st.sidebar.warning("올바른 암호를 입력해야 시스템이 활성화됩니다.")
     st.stop()
 
+# 암호가 맞는 경우 OpenAI 클라이언트 로드
+client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
 
-# -------------------------
-# admit_profiles.json 로드
-# -------------------------
+
+# -------------------------------------------------------
+# 합격 패턴 DB 로드
+# -------------------------------------------------------
 @st.cache_data
 def load_admit_profiles():
     with open("config/admit_profiles.json", "r", encoding="utf-8") as f:
@@ -31,20 +46,16 @@ def load_admit_profiles():
 admit_profiles = load_admit_profiles()
 
 
-# -------------------------
-# 패턴 매칭 함수
-# -------------------------
+# -------------------------------------------------------
+# 패턴 점수 계산 함수
+# -------------------------------------------------------
 def calculate_pattern_match(student_text, university, major):
     profile = admit_profiles.get(university, {}).get(major, {})
     if not profile:
         return None
 
     def score_keywords(keywords):
-        score = 0
-        for kw in keywords:
-            if kw in student_text:
-                score += 1
-        return score / max(len(keywords), 1)
+        return sum(kw in student_text for kw in keywords) / max(len(keywords), 1)
 
     result = {
         "핵심역량 점수": score_keywords(profile.get("핵심역량", [])),
@@ -65,9 +76,9 @@ def calculate_pattern_match(student_text, university, major):
     return result
 
 
-# -------------------------
+# -------------------------------------------------------
 # 마인드맵 시각화 함수
-# -------------------------
+# -------------------------------------------------------
 def display_mindmap(mindmap_json):
     data = json.loads(mindmap_json)
 
@@ -75,17 +86,13 @@ def display_mindmap(mindmap_json):
     net.add_node("학생부 핵심구조", shape="ellipse", color="#FFB347")
 
     # 1차 노드
-    net.add_node("요약", color="#77DD77")
-    net.add_edge("학생부 핵심구조", "요약")
+    keys = ["summary", "strengths", "weaknesses", "activities"]
+    colors = ["#77DD77", "#AEC6CF", "#FF6961", "#FDFD96"]
+    labels = ["요약", "강점", "약점", "활동"]
 
-    net.add_node("강점", color="#AEC6CF")
-    net.add_edge("학생부 핵심구조", "강점")
-
-    net.add_node("약점", color="#FF6961")
-    net.add_edge("학생부 핵심구조", "약점")
-
-    net.add_node("활동", color="#FDFD96")
-    net.add_edge("학생부 핵심구조", "활동")
+    for label, key, color in zip(labels, keys, colors):
+        net.add_node(label, color=color)
+        net.add_edge("학생부 핵심구조", label)
 
     # summary
     net.add_node(data["summary"], shape="box")
@@ -105,6 +112,7 @@ def display_mindmap(mindmap_json):
     for key, items in data["activities"].items():
         net.add_node(key, color="#FFF380")
         net.add_edge("활동", key)
+
         for item in items:
             net.add_node(item, shape="box")
             net.add_edge(key, item)
@@ -113,9 +121,9 @@ def display_mindmap(mindmap_json):
     return html
 
 
-# -------------------------
-# 로그인
-# -------------------------
+# -------------------------------------------------------
+# 로그인 처리
+# -------------------------------------------------------
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -124,80 +132,67 @@ if st.session_state.user is None:
 
     name = st.text_input("이름")
     school = st.text_input("학교명")
-    year = st.number_input("지원 학년도", value=2025, step=1)
+    year = st.number_input("지원 학년도", value=2025)
 
     if st.button("로그인"):
         st.session_state.user = {"name": name, "school": school, "year": year}
+
     st.stop()
 
 st.sidebar.success(f"{st.session_state.user['name']}님 로그인됨")
 
 
-# -------------------------
+# -------------------------------------------------------
 # 관리자 페이지
-# -------------------------
-st.sidebar.subheader("관리자")
-if st.sidebar.checkbox("관리자 페이지 열기"):
+# -------------------------------------------------------
+st.sidebar.subheader("관리자 도구")
+if st.sidebar.checkbox("관리자 ZIP 다운로드"):
     st.title("관리자 페이지")
-
     if st.button("전체 ZIP 다운로드"):
         zip_path = admin_zip_download()
         with open(zip_path, "rb") as z:
             st.download_button("ZIP 다운로드", z, file_name="all_reports.zip")
-
     st.stop()
 
 
-# -------------------------
-# 1. 생기부 업로드
-# -------------------------
+# -------------------------------------------------------
+# PDF 업로드
+# -------------------------------------------------------
 st.header("1. 생활기록부 업로드")
-uploaded_pdf = st.file_uploader("PDF 업로드", type=["pdf"])
+uploaded_pdf = st.file_uploader("PDF 파일 업로드", type=["pdf"])
 
 if uploaded_pdf:
     with pdfplumber.open(uploaded_pdf) as pdf:
-        text = ""
-        for page in pdf.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
 
     st.session_state.raw = text
     st.success("PDF 텍스트 추출 완료!")
 
 
-# -------------------------
-# 2. 분석 조건 입력
-# -------------------------
+# -------------------------------------------------------
+# 조건 입력
+# -------------------------------------------------------
 st.header("2. 희망 대학·학과 입력")
 
 target_univ = st.text_input("희망 대학")
 target_major = st.text_input("희망 학과")
-target_values = st.text_area("대학 인재상 또는 전형 평가 요소")
+target_values = st.text_area("대학 인재상 또는 전형 요소")
 
 
-# -------------------------
-# 3. 분석 시작
-# -------------------------
+# -------------------------------------------------------
+# 분석 실행
+# -------------------------------------------------------
 if st.button("분석 시작"):
 
-    # 패턴 매칭 계산
-    pattern_result = calculate_pattern_match(
-        st.session_state.raw,
-        target_univ,
-        target_major
+    st.session_state["pattern_result"] = calculate_pattern_match(
+        st.session_state.raw, target_univ, target_major
     )
-    st.session_state["pattern_result"] = pattern_result
 
     with st.spinner("AI 분석 중..."):
 
-        # 생기부 섹션 자동 분리
         sections = parse_student_record(st.session_state.raw)
-
-        # 독서목록 추출
         books = extract_books(st.session_state.raw)
 
-        # GPT 종합 분석
         gpt_result = run_gpt_analysis(
             client=client,
             sections=sections,
@@ -206,7 +201,6 @@ if st.button("분석 시작"):
             target_values=target_values
         )
 
-        # 독서 분석
         book_results = []
         for b in books:
             summary = summarize_book(client, b)
@@ -220,21 +214,18 @@ if st.button("분석 시작"):
         st.session_state.books = book_results
 
 
-# -------------------------
-# 4. 분석 결과 출력
-# -------------------------
+# -------------------------------------------------------
+# 분석 결과 출력
+# -------------------------------------------------------
 if "analysis" in st.session_state:
     st.header("3. 분석 결과")
 
-    # 패턴 매칭 결과
-    st.subheader("🎯 대학·전공 패턴 매칭 결과")
+    st.subheader("🎯 패턴 매칭 결과")
     st.write(st.session_state["pattern_result"])
 
-    # GPT 종합 분석
     st.subheader("종합 분석 결과")
     st.write(st.session_state.analysis)
 
-    # 독서 분석 출력
     st.subheader("📚 독서활동 분석")
     for b in st.session_state.books:
         st.markdown(f"### **{b['title']} — {b['author']}**")
@@ -246,12 +237,10 @@ if "analysis" in st.session_state:
         st.write("\n".join(b["summary"]["projects"]))
         st.markdown("---")
 
-    # 마인드맵 시각화
     st.subheader("🧠 마인드맵 시각화")
     html = display_mindmap(st.session_state.analysis["mindmap"])
     components.html(html, height=650, scrolling=True)
 
-    # PDF 저장
     if st.button("PDF 저장"):
         pdf_bytes = generate_pdf(
             st.session_state.user,
