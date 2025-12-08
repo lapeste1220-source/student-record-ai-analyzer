@@ -242,9 +242,16 @@ if "analysis" in st.session_state:
     components.html(html, height=650, scrolling=True)
 
     if st.button("PDF 저장"):
-        pdf_bytes = generate_pdf(
-            st.session_state.user,
-            st.session_state.analysis,
-            st.session_state.books
-        )
-        st.download_button("PDF 다운로드", pdf_bytes, file_name="analysis.pdf")
+    html_bytes = generate_html_report(
+        st.session_state.user,
+        st.session_state.analysis,
+        st.session_state.books
+    )
+
+    st.download_button(
+        "📥 HTML 리포트 다운로드",
+        html_bytes,
+        file_name="analysis_report.html",
+        mime="text/html"
+    )
+
