@@ -1,7 +1,8 @@
 import streamlit as st
 import pdfplumber
-from openai import OpenAI
 import json
+from openai import OpenAI
+import streamlit.components.v1 as components
 
 from utils import (
     parse_student_record,
@@ -12,28 +13,29 @@ from utils import (
 from analysis import run_gpt_analysis, summarize_book
 
 
-# -------------------------------------------------------
+# ==============================
 # 기본 설정
-# -------------------------------------------------------
+# ==============================
 st.set_page_config(page_title="AI 생기부 분석 시스템", layout="wide")
 
 
-# -------------------------------------------------------
-# 보안용 암호 입력
-# -------------------------------------------------------
+# ==============================
+# 관리자 인증
+# ==============================
 st.sidebar.header("접속 인증")
+
 password = st.sidebar.text_input("접속 암호", type="password")
 
 if password != st.secrets["ADMIN_PASSWORD"]:
-    st.sidebar.warning("올바른 암호를 입력해야 합니다.")
+    st.sidebar.warning("올바른 암호를 입력해야 시스템이 실행됩니다.")
     st.stop()
 
 client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
 
 
-# -------------------------------------------------------
-# 합격 패턴 DB 로드 (학과 단독 기반)
-# -------------------------------------------------------
+# ==============================
+# 학과 패턴 DB 로드
+# ==============================
 @st.cache_data
 def load_admit_profiles():
     with open("config/admit_profiles.json", "r", encoding="utf-8") as f:
@@ -42,12 +44,12 @@ def load_admit_profiles():
 admit_profiles = load_admit_profiles()
 
 
-# -------------------------------------------------------
-# 패턴 매칭 점수 계산 (학과만 사용)
-# -------------------------------------------------------
+# ==============================
+# 패턴 점수 계산
+# ==============================
 def calculate_pattern_match(student_text, major):
-    profile = admit_profiles.get(major, {})
 
+    profile = admit_profiles.get(major, None)
     if not profile:
         return None
 
@@ -55,27 +57,27 @@ def calculate_pattern_match(student_text, major):
         return sum(kw in student_text for kw in keywords) / max(len(keywords), 1)
 
     result = {
-        "핵심역량 점수": score_keywords(profile.get("핵심역량", [])),
-        "세특 패턴 점수": score_keywords(profile.get("세특패턴", [])),
-        "탐구 패턴 점수": score_keywords(profile.get("탐구·프로젝트 패턴", [])),
-        "독서 패턴 점수": score_keywords(profile.get("독서 패턴", [])),
-        "비교과 패턴 점수": score_keywords(profile.get("비교과 패턴", [])),
+        "핵심역량": score_keywords(profile.get("핵심역량", [])),
+        "세특 패턴": score_keywords(profile.get("세특패턴", [])),
+        "탐구 패턴": score_keywords(profile.get("탐구·프로젝트 패턴", [])),
+        "독서 패턴": score_keywords(profile.get("독서 패턴", [])),
+        "비교과 패턴": score_keywords(profile.get("비교과 패턴", [])),
     }
 
     result["총합 점수"] = (
-        result["핵심역량 점수"] * 0.30 +
-        result["세특 패턴 점수"] * 0.30 +
-        result["탐구 패턴 점수"] * 0.20 +
-        result["독서 패턴 점수"] * 0.10 +
-        result["비교과 패턴 점수"] * 0.10
+        result["핵심역량"] * 0.30 +
+        result["세특 패턴"] * 0.30 +
+        result["탐구 패턴"] * 0.20 +
+        result["독서 패턴"] * 0.10 +
+        result["비교과 패턴"] * 0.10
     )
 
     return result
 
 
-# -------------------------------------------------------
+# ==============================
 # 로그인
-# -------------------------------------------------------
+# ==============================
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -84,7 +86,7 @@ if st.session_state.user is None:
 
     name = st.text_input("이름")
     school = st.text_input("학교명")
-    year = st.number_input("지원 학년도", value=2025)
+    year = st.number_input("학년도", value=2025)
 
     if st.button("로그인"):
         st.session_state.user = {"name": name, "school": school, "year": year}
@@ -94,74 +96,70 @@ if st.session_state.user is None:
 st.sidebar.success(f"{st.session_state.user['name']}님 로그인됨")
 
 
-# -------------------------------------------------------
-# 관리자 메뉴
-# -------------------------------------------------------
+# ==============================
+# 관리자 ZIP
+# ==============================
 st.sidebar.subheader("관리자 메뉴")
 if st.sidebar.checkbox("ZIP 다운로드"):
-    st.title("관리자 다운로드 페이지")
+    st.title("관리자 다운로드")
     if st.button("전체 ZIP 생성"):
-        zip_path = admin_zip_download()
-        with open(zip_path, "rb") as z:
-            st.download_button("ZIP 다운로드", z, file_name="all_reports.zip")
+        path = admin_zip_download()
+        with open(path, "rb") as f:
+            st.download_button("ZIP 다운로드", f, file_name="all_reports.zip")
     st.stop()
 
 
-# -------------------------------------------------------
+# ==============================
 # PDF 업로드
-# -------------------------------------------------------
+# ==============================
 st.header("1. 생활기록부 PDF 업로드")
 
 uploaded_pdf = st.file_uploader("PDF 업로드", type=["pdf"])
 
 if uploaded_pdf:
     with pdfplumber.open(uploaded_pdf) as pdf:
-        text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
 
     st.session_state.raw = text
     st.success("PDF 텍스트 추출 완료!")
 
 
-# -------------------------------------------------------
-# 희망 학과 입력 (대학 제거됨)
-# -------------------------------------------------------
-st.header("2. 희망 학과 입력")
+# ==============================
+# 학과 선택
+# ==============================
+st.header("2. 희망 학과 선택")
 
-target_major = st.text_input("희망 학과")
-target_values = st.text_area("전형 요소 / 인재상 (선택)")
+all_majors = list(admit_profiles.keys())
+target_major = st.selectbox("희망 학과", all_majors)
 
 
-# -------------------------------------------------------
-# 분석 시작
-# -------------------------------------------------------
+# ==============================
+# 분석 실행
+# ==============================
 if st.button("분석 시작"):
 
     if "raw" not in st.session_state:
-        st.error("먼저 PDF를 업로드하세요.")
+        st.error("PDF를 먼저 업로드하세요.")
         st.stop()
 
-    # 전공 매칭 점수 계산
-    st.session_state["pattern_result"] = calculate_pattern_match(
-        st.session_state.raw, target_major
+    st.session_state.pattern_result = calculate_pattern_match(
+        st.session_state.raw,
+        target_major
     )
 
-    with st.spinner("AI 분석 중입니다..."):
+    with st.spinner("AI 분석 중..."):
 
-        # 생기부 파싱
         sections = parse_student_record(st.session_state.raw)
-
-        # 독서 추출
         books = extract_books(st.session_state.raw)
 
-        # GPT 분석
         gpt_result = run_gpt_analysis(
             client=client,
             sections=sections,
+            target_univ=None,
             target_major=target_major,
-            target_values=target_values,
+            target_values=None
         )
 
-        # 독서 분석
         book_results = []
         for b in books:
             summary = summarize_book(client, b)
@@ -175,41 +173,36 @@ if st.button("분석 시작"):
         st.session_state.books = book_results
 
 
-# -------------------------------------------------------
-# 결과 출력
-# -------------------------------------------------------
+# ==============================
+# 분석 결과 출력
+# ==============================
 if "analysis" in st.session_state:
+
     st.header("3. 분석 결과")
 
-    st.subheader("🎯 전공 패턴 매칭 점수")
-    st.write(st.session_state["pattern_result"])
+    st.subheader("🎯 학과 패턴 매칭 점수")
+    st.write(st.session_state.pattern_result)
 
     st.subheader("📝 종합 분석 결과")
     st.write(st.session_state.analysis)
 
-    st.subheader("📚 독서 활동 분석")
+    st.subheader("📚 독서활동 분석")
     for b in st.session_state.books:
         st.markdown(f"### 📘 {b['title']} — {b['author']}")
-        st.write("\n".join(b["summary"]["summary_text"]))
-        st.write("**전공 연계:**")
-        st.write("\n".join(b["summary"]["major_links"]))
-        st.write("**프로젝트 제안:**")
-        st.write("\n".join(b["summary"]["projects"]))
+        st.write("\n".join(b["summary"].get("summary_text", [])))
+        st.write("\n".join(b["summary"].get("major_links", [])))
+        st.write("\n".join(b["summary"].get("projects", [])))
         st.markdown("---")
 
-    st.subheader("🧠 마인드맵(JSON 출력)")
-    st.json(json.loads(st.session_state.analysis["mindmap"]))
-
-    st.subheader("📥 HTML 리포트 다운로드")
     html_bytes = generate_html_report(
         st.session_state.user,
         st.session_state.analysis,
-        st.session_state.books,
+        st.session_state.books
     )
 
     st.download_button(
-        "HTML 리포트 다운로드",
+        "📥 HTML 리포트 다운로드",
         html_bytes,
         file_name="analysis_report.html",
-        mime="text/html",
+        mime="text/html"
     )
