@@ -22,18 +22,17 @@ st.set_page_config(page_title="AI 생기부 분석 시스템", layout="wide")
 # 보안용 암호 입력
 # -------------------------------------------------------
 st.sidebar.header("접속 인증")
-
 password = st.sidebar.text_input("접속 암호", type="password")
 
 if password != st.secrets["ADMIN_PASSWORD"]:
-    st.sidebar.warning("올바른 암호를 입력해야 시스템이 실행됩니다.")
+    st.sidebar.warning("올바른 암호를 입력해야 합니다.")
     st.stop()
 
 client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
 
 
 # -------------------------------------------------------
-# 합격 패턴 DB 로드 (학과 단일 구조)
+# 합격 패턴 DB 로드 (학과 단독 기반)
 # -------------------------------------------------------
 @st.cache_data
 def load_admit_profiles():
@@ -44,7 +43,7 @@ admit_profiles = load_admit_profiles()
 
 
 # -------------------------------------------------------
-# 패턴 매칭 점수 계산 (학과 중심)
+# 패턴 매칭 점수 계산 (학과만 사용)
 # -------------------------------------------------------
 def calculate_pattern_match(student_text, major):
     profile = admit_profiles.get(major, {})
@@ -75,7 +74,7 @@ def calculate_pattern_match(student_text, major):
 
 
 # -------------------------------------------------------
-# 로그인 처리
+# 로그인
 # -------------------------------------------------------
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -88,11 +87,7 @@ if st.session_state.user is None:
     year = st.number_input("지원 학년도", value=2025)
 
     if st.button("로그인"):
-        st.session_state.user = {
-            "name": name,
-            "school": school,
-            "year": year,
-        }
+        st.session_state.user = {"name": name, "school": school, "year": year}
 
     st.stop()
 
@@ -128,12 +123,12 @@ if uploaded_pdf:
 
 
 # -------------------------------------------------------
-# 희망 학과 입력
+# 희망 학과 입력 (대학 제거됨)
 # -------------------------------------------------------
 st.header("2. 희망 학과 입력")
 
-target_major = st.text_input("희망 학과 (예: 컴퓨터·소프트웨어, 화학공학, 의학 등)")
-target_values = st.text_area("대학 인재상 / 전형 요소 (선택)")
+target_major = st.text_input("희망 학과")
+target_values = st.text_area("전형 요소 / 인재상 (선택)")
 
 
 # -------------------------------------------------------
@@ -145,36 +140,35 @@ if st.button("분석 시작"):
         st.error("먼저 PDF를 업로드하세요.")
         st.stop()
 
-    # 패턴 매칭
+    # 전공 매칭 점수 계산
     st.session_state["pattern_result"] = calculate_pattern_match(
         st.session_state.raw, target_major
     )
 
     with st.spinner("AI 분석 중입니다..."):
 
-        # 생기부 자동 분리
+        # 생기부 파싱
         sections = parse_student_record(st.session_state.raw)
 
-        # 독서 자동 추출
+        # 독서 추출
         books = extract_books(st.session_state.raw)
 
         # GPT 분석
         gpt_result = run_gpt_analysis(
             client=client,
             sections=sections,
-            target_univ="",          # 대학 사용 X
             target_major=target_major,
             target_values=target_values,
         )
 
-        # 독서 분석 수행
+        # 독서 분석
         book_results = []
         for b in books:
             summary = summarize_book(client, b)
             book_results.append({
                 "title": b["title"],
                 "author": b["author"],
-                "summary": summary
+                "summary": summary,
             })
 
         st.session_state.analysis = gpt_result
@@ -182,7 +176,7 @@ if st.button("분석 시작"):
 
 
 # -------------------------------------------------------
-# 분석 결과 출력
+# 결과 출력
 # -------------------------------------------------------
 if "analysis" in st.session_state:
     st.header("3. 분석 결과")
@@ -193,10 +187,9 @@ if "analysis" in st.session_state:
     st.subheader("📝 종합 분석 결과")
     st.write(st.session_state.analysis)
 
-    st.subheader("📚 독서활동 분석")
+    st.subheader("📚 독서 활동 분석")
     for b in st.session_state.books:
         st.markdown(f"### 📘 {b['title']} — {b['author']}")
-
         st.write("\n".join(b["summary"]["summary_text"]))
         st.write("**전공 연계:**")
         st.write("\n".join(b["summary"]["major_links"]))
@@ -204,20 +197,19 @@ if "analysis" in st.session_state:
         st.write("\n".join(b["summary"]["projects"]))
         st.markdown("---")
 
-    # mindmap 출력은 오류가 많아 임시 비활성화
-    st.subheader("🧠 마인드맵(JSON 출력 예정)")
-    st.info("마인드맵 기능은 업데이트 중입니다. 다음 버전에서 자동 생성됩니다.")
+    st.subheader("🧠 마인드맵(JSON 출력)")
+    st.json(json.loads(st.session_state.analysis["mindmap"]))
 
     st.subheader("📥 HTML 리포트 다운로드")
     html_bytes = generate_html_report(
         st.session_state.user,
         st.session_state.analysis,
-        st.session_state.books
+        st.session_state.books,
     )
 
     st.download_button(
         "HTML 리포트 다운로드",
         html_bytes,
         file_name="analysis_report.html",
-        mime="text/html"
+        mime="text/html",
     )
