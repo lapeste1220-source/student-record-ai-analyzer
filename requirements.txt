@@ -5,3 +5,4 @@ openai
 xhtml2pdf
 pandas
 numpy
+pyvis
