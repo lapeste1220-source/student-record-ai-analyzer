@@ -5,13 +5,14 @@ from openai import OpenAI
 from utils import parse_student_record, extract_books, generate_pdf, admin_zip_download
 from analysis import run_gpt_analysis, summarize_book
 
-st.set_page_config(page_title="AI 생기부 분석", layout="wide")
+st.set_page_config(page_title="AI 생기부 분석 시스템", layout="wide")
 
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# ----------------------
+
+# -------------------------
 # 로그인
-# ----------------------
+# -------------------------
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -33,7 +34,9 @@ if st.session_state.user is None:
 st.sidebar.success(f"{st.session_state.user['name']}님 로그인됨")
 
 
-# 관리자 메뉴
+# -------------------------
+# 관리자 페이지
+# -------------------------
 st.sidebar.subheader("관리자")
 if st.sidebar.checkbox("관리자 페이지 열기"):
     st.title("관리자 페이지")
@@ -46,9 +49,9 @@ if st.sidebar.checkbox("관리자 페이지 열기"):
     st.stop()
 
 
-# ----------------------
-# PDF 업로드
-# ----------------------
+# -------------------------
+# 생기부 업로드
+# -------------------------
 st.header("1. 생활기록부 업로드")
 uploaded_pdf = st.file_uploader("PDF 업로드", type=["pdf"])
 
@@ -62,9 +65,9 @@ if uploaded_pdf:
     st.success("PDF 텍스트 추출 완료!")
 
 
-# ----------------------
-# 분석 조건
-# ----------------------
+# -------------------------
+# 분석 조건 입력
+# -------------------------
 st.header("2. 희망 대학·학과 입력")
 
 target_univ = st.text_input("희망 대학")
@@ -78,7 +81,8 @@ if st.button("분석 시작"):
         sections = parse_student_record(st.session_state.raw)
         books = extract_books(st.session_state.raw)
 
-        analysis_result = run_gpt_analysis(
+        # GPT 종합 분석
+        gpt_result = run_gpt_analysis(
             client=client,
             sections=sections,
             target_univ=target_univ,
@@ -86,23 +90,38 @@ if st.button("분석 시작"):
             target_values=target_values
         )
 
-        book_results = [summarize_book(client, b) for b in books]
+        # 독서 분석 수행
+        book_results = []
+        for b in books:
+            summary = summarize_book(client, b)
+            book_results.append({"title": b["title"], "author": b["author"], "summary": summary})
 
-        st.session_state.analysis = analysis_result
+        st.session_state.analysis = gpt_result
         st.session_state.books = book_results
 
 
-# ----------------------
+
+# -------------------------
 # 분석 결과 출력
-# ----------------------
+# -------------------------
 if "analysis" in st.session_state:
     st.header("3. 분석 결과")
+
+    st.subheader("종합 분석 결과")
     st.write(st.session_state.analysis)
 
-    st.header("독서 분석")
+    st.subheader("📚 독서활동 분석")
+
     for b in st.session_state.books:
-        st.markdown(f"### {b['title']} — {b['author']}")
-        st.write(b["summary"])
+        with st.container():
+            st.markdown(f"### **{b['title']} — {b['author']}**")
+            st.markdown("---")
+            st.write("\n".join(b["summary"]["summary_text"]))
+            st.write("**전공 연계:**")
+            st.write("\n".join(b["summary"]["major_links"]))
+            st.write("**프로젝트 제안:**")
+            st.write("\n".join(b["summary"]["projects"]))
+            st.markdown("---")
 
     # PDF 저장
     if st.button("PDF 저장"):
