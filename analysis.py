@@ -1,26 +1,45 @@
+import json
+
+
+# =====================================================
+# 1) GPT 기반 학생부 종합 분석
+# =====================================================
 def run_gpt_analysis(client, sections, target_univ, target_major, target_values):
 
     prompt = f"""
-    아래는 학생의 생활기록부 주요 항목입니다:
+    너는 학생부 종합전형 전문 컨설턴트다.
 
-    {sections}
+    아래는 학생의 생활기록부 주요 항목이다:
+
+    {json.dumps(sections, ensure_ascii=False, indent=2)}
 
     목표 대학: {target_univ}
     목표 학과: {target_major}
     대학/학과 인재상: {target_values}
 
-    아래 형식으로 분석하시오(학생부 어투 유지):
+    아래 형식으로 출력하라(중요: 반드시 JSON 구조로 출력):
 
-    1) 학생부 한 줄 요약
-    2) 강점 3~5개
-    3) 약점 3~5개
-    4) 1·2학년 내용과 연결하여 3학년 구체적 보완 전략:
-       - 프로젝트 2개
-       - 보고서 주제 2개
-       - 독서 제안 2권
-       - 학급/학년 프로젝트 제안
-       - 리더십·협력 활동 제안
-    5) 마인드맵 구조(JSON)
+    {{
+      "summary": "학생부 한 줄 요약",
+      "strengths": ["강점1", "강점2", "강점3"],
+      "weaknesses": ["약점1", "약점2", "약점3"],
+      "suggestions": {{
+          "projects": ["프로젝트1", "프로젝트2"],
+          "reports": ["보고서 주제1", "보고서 주제2"],
+          "books": ["추천 도서1", "추천 도서2"],
+          "class_activity": "학급 또는 학년 프로젝트 제안",
+          "leadership": "리더십/협력 활동 제안"
+      }},
+      "mindmap": {{
+         "summary": "핵심요약",
+         "strengths": ["강점A","강점B"],
+         "weaknesses": ["약점A","약점B"],
+         "activities": {{
+            "탐구활동":["활동1","활동2"],
+            "프로젝트":["활동3","활동4"]
+         }}
+      }}
+    }}
     """
 
     response = client.chat.completions.create(
@@ -28,30 +47,37 @@ def run_gpt_analysis(client, sections, target_univ, target_major, target_values)
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return response.choices[0].message["content"]
+    content = response.choices[0].message["content"]
+
+    try:
+        return json.loads(content)   # JSON 파싱 시도
+    except:
+        # 실패 시 GPT 출력 중 JSON 부분만 추출
+        json_start = content.find("{")
+        json_end = content.rfind("}")
+        cleaned = content[json_start:json_end+1]
+        return json.loads(cleaned)
 
 
-
-
+# =====================================================
+# 2) GPT 기반 독서 분석 (심화 모드)
+# =====================================================
 def summarize_book(client, book):
-    """
-    심화 모드 분석:
-    - 책 요약 10줄
-    - 학생이 적은 독서내용 활용
-    - 전공연계 3개
-    - 프로젝트 제안 2개
-    """
 
     prompt = f"""
+    너는 학생부 독서 영역 전문분석가다.
+
     도서명: {book['title']}
     저자: {book['author']}
-    학생 독서기록 내용: {book['student_note']}
+    학생이 적은 독서기록 내용: {book['student_note']}
 
-    다음 기준에 따라 분석하시오(학생부 어투):
+    아래 형식(JSON)으로 출력하라:
 
-    1) 책 핵심 요약(약 10줄)
-    2) 전공 관련 역량 또는 학업역량과의 연계 3개
-    3) 보고서 또는 프로젝트 제안 2개
+    {{
+      "summary_text": ["요약1", "요약2", "..."],
+      "major_links": ["전공 연계1", "전공 연계2", "전공 연계3"],
+      "projects": ["프로젝트 제안1", "프로젝트 제안2"]
+    }}
     """
 
     response = client.chat.completions.create(
@@ -59,10 +85,12 @@ def summarize_book(client, book):
         messages=[{"role": "user", "content": prompt}]
     )
 
-    text = response.choices[0].message["content"].strip()
+    content = response.choices[0].message["content"]
 
-    return {
-        "summary_text": text.split("\n")[0:10],
-        "major_links": text.split("\n")[10:13],
-        "projects": text.split("\n")[13:15],
-    }
+    try:
+        return json.loads(content)
+    except:
+        json_start = content.find("{")
+        json_end = content.rfind("}")
+        cleaned = content[json_start:json_end+1]
+        return json.loads(cleaned)
