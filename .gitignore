@@ -1,0 +1,10 @@
+# Streamlit secrets
+.streamlit/
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+
+# 기타 필요시
+.env
