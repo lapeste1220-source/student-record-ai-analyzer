@@ -15,6 +15,10 @@ from analysis import run_gpt_analysis, summarize_book
 st.set_page_config(page_title="AI 생기부 분석 시스템", layout="wide")
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
+if password != st.secrets["ADMIN_PASSWORD"]:
+    st.error("잘못된 암호입니다.")
+    st.stop()
+
 
 # -------------------------
 # admit_profiles.json 로드
