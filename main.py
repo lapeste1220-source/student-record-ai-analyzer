@@ -1,3 +1,12 @@
+import json
+
+@st.cache_data
+def load_admit_profiles():
+    with open("config/admit_profiles.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
+admit_profiles = load_admit_profiles()
+
 import streamlit as st
 import pdfplumber
 from openai import OpenAI
@@ -197,6 +206,36 @@ def display_mindmap(mindmap_json):
     ''')
 
     html = net.generate_html("mindmap.html")
+def calculate_pattern_match(student_text, university, major):
+    profile = admit_profiles.get(university, {}).get(major, {})
+    if not profile:
+        return None
+
+    def score_keywords(keywords):
+        score = 0
+        for kw in keywords:
+            if kw in student_text:
+                score += 1
+        return score / max(len(keywords), 1)
+
+    result = {
+        "핵심역량 점수": score_keywords(profile.get("핵심역량", [])),
+        "세특 패턴 점수": score_keywords(profile.get("세특패턴", [])),
+        "탐구 패턴 점수": score_keywords(profile.get("탐구·프로젝트 패턴", [])),
+        "독서 패턴 점수": score_keywords(profile.get("독서 패턴", [])),
+        "비교과 패턴 점수": score_keywords(profile.get("비교과 패턴", [])),
+    }
+
+    # 총점 (가중치 조정 가능)
+    result["총합 점수"] = (
+        result["핵심역량 점수"] * 0.30 +
+        result["세특 패턴 점수"] * 0.30 +
+        result["탐구 패턴 점수"] * 0.20 +
+        result["독서 패턴 점수"] * 0.10 +
+        result["비교과 패턴 점수"] * 0.10
+    )
+
+    return result
 
     # Streamlit에 표시
     components.html(html, height=650, scrolling=True)
