@@ -1,96 +1,107 @@
 import json
+from openai import OpenAI
 
 
 # =====================================================
-# 1) GPT 기반 학생부 종합 분석
+# 1) 종합 GPT 분석 (학생부 분석 전체)
 # =====================================================
 def run_gpt_analysis(client, sections, target_univ, target_major, target_values):
 
     prompt = f"""
-    너는 학생부 종합전형 전문 컨설턴트다.
+다음은 학생부 주요 항목입니다:
 
-    아래는 학생의 생활기록부 주요 항목이다:
+{json.dumps(sections, ensure_ascii=False, indent=2)}
 
-    {json.dumps(sections, ensure_ascii=False, indent=2)}
+희망 학과: {target_major}
 
-    목표 대학: {target_univ}
-    목표 학과: {target_major}
-    대학/학과 인재상: {target_values}
+학생부 분석을 아래 형식의 **JSON**으로 정확히 출력하세요.
 
-    아래 형식으로 출력하라(중요: 반드시 JSON 구조로 출력):
+{
+  "summary": "한 줄 요약",
+  "strengths": ["강점1", "강점2", "강점3"],
+  "weaknesses": ["약점1", "약점2", "약점3"],
+  "recommendations": {
+      "projects": ["프로젝트 제안 1", "프로젝트 제안 2"],
+      "reports": ["보고서 주제 1", "보고서 주제 2"],
+      "books": ["추천도서1", "추천도서2"],
+      "leadership": ["리더십 활동 제안"]
+  },
+  "mindmap": {
+      "summary": "요약",
+      "strengths": ["강점1", "강점2"],
+      "weaknesses": ["약점1", "약점2"],
+      "activities": {
+          "projects": ["프로젝트1"],
+          "reading": ["독서1"],
+          "extracurricular": ["비교과1"]
+      }
+  }
+}
 
-    {{
-      "summary": "학생부 한 줄 요약",
-      "strengths": ["강점1", "강점2", "강점3"],
-      "weaknesses": ["약점1", "약점2", "약점3"],
-      "suggestions": {{
-          "projects": ["프로젝트1", "프로젝트2"],
-          "reports": ["보고서 주제1", "보고서 주제2"],
-          "books": ["추천 도서1", "추천 도서2"],
-          "class_activity": "학급 또는 학년 프로젝트 제안",
-          "leadership": "리더십/협력 활동 제안"
-      }},
-      "mindmap": {{
-         "summary": "핵심요약",
-         "strengths": ["강점A","강점B"],
-         "weaknesses": ["약점A","약점B"],
-         "activities": {{
-            "탐구활동":["활동1","활동2"],
-            "프로젝트":["활동3","활동4"]
-         }}
-      }}
-    }}
-    """
+위 JSON 구조 이외의 설명, 문장은 절대로 넣지 마세요.
+"""
 
     response = client.chat.completions.create(
         model="gpt-5",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[
+            {"role": "user", "content": prompt}
+        ]
     )
 
-    content = response.choices[0].message["content"]
+    raw = response.choices[0].message["content"].strip()
 
+    # JSON 파싱 시도
     try:
-        return json.loads(content)   # JSON 파싱 시도
+        data = json.loads(raw)
+        return data
     except:
-        # 실패 시 GPT 출력 중 JSON 부분만 추출
-        json_start = content.find("{")
-        json_end = content.rfind("}")
-        cleaned = content[json_start:json_end+1]
-        return json.loads(cleaned)
+        # 파싱 실패하면 최소한의 구조로 반환 (앱 크래시 방지)
+        return {
+            "summary": "정보 분석 중 오류 발생",
+            "strengths": [],
+            "weaknesses": [],
+            "recommendations": {},
+            "mindmap": {}
+        }
+
 
 
 # =====================================================
-# 2) GPT 기반 독서 분석 (심화 모드)
+# 2) 책 Summary 분석
 # =====================================================
 def summarize_book(client, book):
 
     prompt = f"""
-    너는 학생부 독서 영역 전문분석가다.
+도서명: {book['title']}
+저자: {book['author']}
+학생 독서 기록: {book['student_note']}
 
-    도서명: {book['title']}
-    저자: {book['author']}
-    학생이 적은 독서기록 내용: {book['student_note']}
+아래 형식의 **JSON**으로 정확하게 출력하세요:
 
-    아래 형식(JSON)으로 출력하라:
+{
+  "summary_text": ["핵심 요약1", "핵심 요약2", "핵심 요약3"],
+  "major_links": ["전공 연계1", "전공 연계2", "전공 연계3"],
+  "projects": ["프로젝트 제안1", "프로젝트 제안2"]
+}
 
-    {{
-      "summary_text": ["요약1", "요약2", "..."],
-      "major_links": ["전공 연계1", "전공 연계2", "전공 연계3"],
-      "projects": ["프로젝트 제안1", "프로젝트 제안2"]
-    }}
-    """
+위 JSON 형식을 반드시 지키고, 설명 문장은 절대로 추가하지 마세요.
+"""
 
     response = client.chat.completions.create(
         model="gpt-5",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    content = response.choices[0].message["content"]
+    raw = response.choices[0].message["content"].strip()
 
+    # JSON 파싱
     try:
-        return json.loads(content)
+        data = json.loads(raw)
+        return data
     except:
-        json_start = content.find("{")
-        json_end = content.rfind("}")
-        cleaned = content[json_start:json_end+1]
-        return json.loads(cleaned)
+        # 실패 시 최소 구조 제공
+        return {
+            "summary_text": ["요약 생성 실패"],
+            "major_links": [],
+            "projects": []
+        }
