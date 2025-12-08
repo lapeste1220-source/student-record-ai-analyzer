@@ -2,7 +2,6 @@ import streamlit as st
 import pdfplumber
 from openai import OpenAI
 import json
-import streamlit.components.v1 as components
 
 from utils import (
     parse_student_record,
@@ -34,7 +33,7 @@ client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
 
 
 # -------------------------------------------------------
-# 합격 패턴 DB 로드
+# 합격 패턴 DB 로드 (학과 단일 구조)
 # -------------------------------------------------------
 @st.cache_data
 def load_admit_profiles():
@@ -45,10 +44,11 @@ admit_profiles = load_admit_profiles()
 
 
 # -------------------------------------------------------
-# 패턴 매칭 점수 계산
+# 패턴 매칭 점수 계산 (학과 중심)
 # -------------------------------------------------------
-def calculate_pattern_match(student_text, university, major):
-    profile = admit_profiles.get(university, {}).get(major, {})
+def calculate_pattern_match(student_text, major):
+    profile = admit_profiles.get(major, {})
+
     if not profile:
         return None
 
@@ -100,7 +100,7 @@ st.sidebar.success(f"{st.session_state.user['name']}님 로그인됨")
 
 
 # -------------------------------------------------------
-# 관리자 도구
+# 관리자 메뉴
 # -------------------------------------------------------
 st.sidebar.subheader("관리자 메뉴")
 if st.sidebar.checkbox("ZIP 다운로드"):
@@ -128,12 +128,11 @@ if uploaded_pdf:
 
 
 # -------------------------------------------------------
-# 희망 대학·학과 입력
+# 희망 학과 입력
 # -------------------------------------------------------
-st.header("2. 희망 대학·학과 입력")
+st.header("2. 희망 학과 입력")
 
-target_univ = st.text_input("희망 대학")
-target_major = st.text_input("희망 학과")
+target_major = st.text_input("희망 학과 (예: 컴퓨터·소프트웨어, 화학공학, 의학 등)")
 target_values = st.text_area("대학 인재상 / 전형 요소 (선택)")
 
 
@@ -146,8 +145,9 @@ if st.button("분석 시작"):
         st.error("먼저 PDF를 업로드하세요.")
         st.stop()
 
+    # 패턴 매칭
     st.session_state["pattern_result"] = calculate_pattern_match(
-        st.session_state.raw, target_univ, target_major
+        st.session_state.raw, target_major
     )
 
     with st.spinner("AI 분석 중입니다..."):
@@ -162,12 +162,12 @@ if st.button("분석 시작"):
         gpt_result = run_gpt_analysis(
             client=client,
             sections=sections,
-            target_univ=target_univ,
+            target_univ="",          # 대학 사용 X
             target_major=target_major,
             target_values=target_values,
         )
 
-        # 책 분석
+        # 독서 분석 수행
         book_results = []
         for b in books:
             summary = summarize_book(client, b)
@@ -196,6 +196,7 @@ if "analysis" in st.session_state:
     st.subheader("📚 독서활동 분석")
     for b in st.session_state.books:
         st.markdown(f"### 📘 {b['title']} — {b['author']}")
+
         st.write("\n".join(b["summary"]["summary_text"]))
         st.write("**전공 연계:**")
         st.write("\n".join(b["summary"]["major_links"]))
@@ -203,8 +204,9 @@ if "analysis" in st.session_state:
         st.write("\n".join(b["summary"]["projects"]))
         st.markdown("---")
 
-    st.subheader("🧠 마인드맵(JSON 출력)")
-    st.json(json.loads(st.session_state.analysis["mindmap"]))
+    # mindmap 출력은 오류가 많아 임시 비활성화
+    st.subheader("🧠 마인드맵(JSON 출력 예정)")
+    st.info("마인드맵 기능은 업데이트 중입니다. 다음 버전에서 자동 생성됩니다.")
 
     st.subheader("📥 HTML 리포트 다운로드")
     html_bytes = generate_html_report(
