@@ -85,6 +85,9 @@ target_values = st.text_area("대학 인재상 또는 전형 평가 요소")
 
 
 if st.button("분석 시작"):
+    pattern_result = calculate_pattern_match(all_text, univ, major)
+    st.session_state["pattern_result"] = pattern_result
+
     with st.spinner("AI 분석 중..."):
 
         sections = parse_student_record(st.session_state.raw)
@@ -236,6 +239,31 @@ def calculate_pattern_match(student_text, university, major):
     )
 
     return result
+    
+    if "pattern_result" in st.session_state:
+        st.subheader("🎯 대학·전공 패턴 매칭 결과")
+        st.write(st.session_state["pattern_result"])
 
+    prompt = f"""
+    너는 입시전문가다.
+
+    아래는 학생부 전체 내용이다:
+    {all_text}
+
+    아래는 학생이 희망하는 대학/학과 패턴 점수이다:
+    {st.session_state["pattern_result"]}
+
+    점수 기반으로 아래 항목을 작성하라:
+    1) 대학·학과 부합도 총평
+    2) 강점 3가지
+    3) 보완해야 할 약점 3가지
+    4) 3학년 활동·프로젝트 제안 5개 (학생부 흐름과 연결)
+    5) 추천 독서 3권 (전공 맞춤)
+    6) 종합 결론 (300자)
+    """
+
+analysis = call_gpt_api(prompt)
+
+    
     # Streamlit에 표시
     components.html(html, height=650, scrolling=True)
