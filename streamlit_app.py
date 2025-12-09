@@ -288,7 +288,6 @@ def call_gpt_analysis(client, prompt: str):
                 },
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.3,
             # 새 모델에서는 max_tokens 대신 max_completion_tokens 사용
             max_completion_tokens=MAX_COMPLETION_TOKENS,
         )
@@ -368,7 +367,6 @@ def call_gpt_plan(client, prompt: str):
                 },
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.4,
         )
         content = response.choices[0].message.content
         return content
