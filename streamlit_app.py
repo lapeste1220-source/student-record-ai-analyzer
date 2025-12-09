@@ -280,7 +280,7 @@ def call_gpt_analysis(client, prompt: str):
     """학생부 분석 API 호출 (JSON 응답 기대)."""
     try:
         response = client.chat.completions.create(
-            model="gpt-5",  # 선생님 계정에서 사용 가능한 모델명으로 조정 가능
+            model="gpt-5",  # 선생님 계정에서 사용 가능한 모델명
             messages=[
                 {
                     "role": "system",
@@ -288,18 +288,38 @@ def call_gpt_analysis(client, prompt: str):
                 },
                 {"role": "user", "content": prompt},
             ],
-            # 새 모델에서는 max_tokens 대신 max_completion_tokens 사용
+            # gpt-5는 temperature 변경 불가 → 기본값 사용
             max_completion_tokens=MAX_COMPLETION_TOKENS,
+            # 가능하면 JSON만 내놓게 강제
+            response_format={"type": "json_object"},
         )
+
         content = response.choices[0].message.content
-        data = json.loads(content)
-        return data
-    except json.JSONDecodeError:
-        st.error("GPT 응답을 JSON으로 해석하는 데 실패했습니다. 프롬프트를 조금 줄여보거나 다시 시도해 주세요.")
-        return None
+
+        # 1차: 그대로 JSON 파싱 시도
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # 2차: 앞뒤에 설명이 붙었을 경우, 중괄호 부분만 잘라서 파싱
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end != -1 and start < end:
+                try:
+                    cleaned = content[start:end + 1]
+                    return json.loads(cleaned)
+                except Exception:
+                    pass
+
+            # 그래도 안 되면 디버깅용으로 원문을 화면에 보여주고 에러 처리
+            st.error("GPT 응답을 JSON으로 해석하는 데 실패했습니다. 프롬프트를 조금 줄여보거나 다시 시도해 주세요.")
+            with st.expander("디버깅용: GPT 원본 응답 보기"):
+                st.text(content)
+            return None
+
     except Exception as e:
         st.error(f"학생부 분석 중 오류가 발생했습니다: {e}")
         return None
+
 
 
 def build_plan_prompt(student_name, track, major, analysis_data, selected_activities):
