@@ -6,8 +6,8 @@ from io import BytesIO
 from openai import OpenAI
 from pypdf import PdfReader
 from fpdf import FPDF
-from fpdf.errors import FPDFException   # ⬅ 이 줄 추가
-import csv  # 학번/이름 선택을 위한 CSV 사용
+from fpdf.errors import FPDFException
+import csv
 import ast
 
 
@@ -111,7 +111,6 @@ def extract_text_from_pdf(uploaded_file) -> str:
     - 모든 페이지(1쪽~마지막쪽) 사용
     """
     try:
-        # UploadedFile → BytesIO
         uploaded_file.seek(0)
         data = uploaded_file.read()
         buffer = BytesIO(data)
@@ -277,38 +276,93 @@ JSON 형식 (중괄호 포함 전체를 JSON으로만 출력, 다른 설명 문�
     return prompt
 
 
+def extract_message_text(message) -> str:
+    """
+    gpt-5의 다양한 응답 형식(message.content가 str / list / dict 등)을
+    최대한 문자열로 뽑아내는 헬퍼 함수.
+    """
+    content = getattr(message, "content", "")
+
+    # 가장 단순한 경우: 이미 문자열
+    if isinstance(content, str):
+        return content
+
+    text_chunks = []
+
+    # gpt-5 reasoning 모델에서 content가 list로 오는 경우 대비
+    if isinstance(content, list):
+        for part in content:
+            # 문자열이면 그냥 추가
+            if isinstance(part, str):
+                text_chunks.append(part)
+            # dict 형태일 때
+            elif isinstance(part, dict):
+                # 1) {"type": "output_text", "output_text": {"content": [...]}} 패턴
+                if part.get("type") == "output_text" and isinstance(part.get("output_text"), dict):
+                    for seg in part["output_text"].get("content", []):
+                        if isinstance(seg, dict) and "text" in seg:
+                            t = seg["text"]
+                            if isinstance(t, dict):
+                                text_chunks.append(str(t.get("value", "")))
+                            else:
+                                text_chunks.append(str(t))
+                # 2) {"type": "text", "text": {...}} 패턴
+                elif "text" in part:
+                    t = part["text"]
+                    if isinstance(t, dict):
+                        text_chunks.append(str(t.get("value", "")))
+                    else:
+                        text_chunks.append(str(t))
+                else:
+                    # 모르는 형태는 그냥 문자열로 캐스팅
+                    text_chunks.append(str(part))
+            else:
+                text_chunks.append(str(part))
+
+    # 혹시 아무것도 못 뽑았으면 그냥 전체 content를 문자열화
+    if not text_chunks and content:
+        return str(content)
+
+    return "\n".join(text_chunks)
+
+
+def parse_json_like(content: str):
+    """GPT가 준 문자열을 최대한 유연하게 JSON/dict로 바꿔본다."""
+    if not isinstance(content, str):
+        content = str(content)
+
+    text = content.strip()
+
+    # ```json ... ``` 같은 코드블록이면 백틱 제거
+    if text.startswith("```"):
+        end_fence = text.rfind("```")
+        if end_fence > 0:
+            text = text[3:end_fence].strip()
+        # 언어 표시(json 등) 제거
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+
+    # 중괄호 구간만 추출
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and start < end:
+        text = text[start:end + 1]
+
+    # 1차: json.loads
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # 2차: ast.literal_eval 시도
+    try:
+        return ast.literal_eval(text)
+    except Exception:
+        return None
+
+
 def call_gpt_analysis(client, prompt: str):
     """학생부 분석 API 호출 (JSON 응답 기대)."""
-
-    def parse_json_like(content: str):
-        """GPT가 준 문자열을 최대한 유연하게 JSON/dict로 바꿔본다."""
-        text = (content or "").strip()
-
-        # 1) ```json ... ``` 같은 코드블록이면 안쪽만 꺼내기
-        if text.startswith("```"):
-            end_fence = text.rfind("```")
-            if end_fence > 0:
-                # 앞뒤 ``` 제거
-                text = text.strip("`")
-
-        # 2) 중괄호 구간만 추출
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and start < end:
-            text = text[start:end + 1]
-
-        # 3) 먼저 json으로 시도
-        try:
-            return json.loads(text)
-        except Exception:
-            pass
-
-        # 4) 안 되면 Python dict 리터럴로 해석 시도
-        try:
-            return ast.literal_eval(text)
-        except Exception:
-            return None
-
     try:
         response = client.chat.completions.create(
             model="gpt-5",  # 선생님 계정에서 사용 가능한 모델명
@@ -319,24 +373,25 @@ def call_gpt_analysis(client, prompt: str):
                 },
                 {"role": "user", "content": prompt},
             ],
+            # gpt-5에서는 temperature 변경 불가 → 생략 (기본값 1 사용)
             max_completion_tokens=MAX_COMPLETION_TOKENS,
-            response_format={"type": "json_object"},
         )
 
         msg = response.choices[0].message
+        content = extract_message_text(msg)
 
-        # ✅ 1순위: 라이브러리가 이미 파싱해 준 JSON 사용
-        parsed = getattr(msg, "parsed", None)
-        if parsed is not None:
-            return parsed
-
-        # ✅ 2순위: content 문자열에서 직접 파싱 (혹시 response_format을 무시한 경우)
-        content = getattr(msg, "content", "") or ""
         data = parse_json_like(content)
         if data is None:
             st.error("GPT 응답을 JSON으로 해석하는 데 실패했습니다. 아래 원본 응답을 참고해 프롬프트를 조정해 주세요.")
             with st.expander("디버깅용: GPT 원본 응답 보기"):
-                st.text(content)
+                # 문자열 그대로 + 전체 response 구조 같이 보여주기
+                st.markdown("#### message.content 원본")
+                st.text(repr(content))
+                st.markdown("#### 전체 response JSON")
+                try:
+                    st.json(response.model_dump())
+                except Exception:
+                    st.text(str(response))
             return None
 
         return data
@@ -346,10 +401,11 @@ def call_gpt_analysis(client, prompt: str):
         return None
 
 
+# =========================
+# 실시 계획 프롬프트 & 호출
+# =========================
+
 def build_plan_prompt(student_name, track, major, analysis_data, selected_activities):
-    """
-    선택한 추천 활동을 바탕으로 실시 계획 + 학생부 예시 문구 요청 프롬프트.
-    """
     strengths = analysis_data.get("analysis", {}).get("strengths", [])
     weaknesses = analysis_data.get("analysis", {}).get("weaknesses", [])
     keywords = analysis_data.get("analysis", {}).get("keywords", [])
@@ -412,8 +468,8 @@ def call_gpt_plan(client, prompt: str):
                 {"role": "user", "content": prompt},
             ],
         )
-        content = response.choices[0].message.content
-        return content
+        msg = response.choices[0].message
+        return extract_message_text(msg)
     except Exception as e:
         st.error(f"실시 계획/예시 문구 생성 중 오류가 발생했습니다: {e}")
         return None
@@ -424,11 +480,6 @@ def call_gpt_plan(client, prompt: str):
 # =========================
 
 def generate_pdf_from_text(title: str, text: str) -> bytes:
-    """
-    전체 결과(분석 + 계획)를 하나의 텍스트로 받아 PDF로 변환.
-    - NANUMGOTHIC.TTF가 있으면 한글까지 정상 출력
-    - 너무 긴 줄은 강제로 잘라서 fpdf 예외를 방지
-    """
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -436,11 +487,9 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
     use_unicode_font = True
 
     try:
-        # 한글 폰트 사용 (파일명은 실제 업로드된 이름과 동일해야 함)
         pdf.add_font("KOREAN", "", KOREAN_FONT_FILE, uni=True)
         pdf.set_font("KOREAN", size=11)
     except Exception:
-        # 폰트 로딩 실패 → 기본 폰트 + ASCII 필터링
         use_unicode_font = False
         st.warning(
             f"한글 폰트 로딩에 실패했습니다. 폰트 파일({KOREAN_FONT_FILE})을 "
@@ -450,17 +499,13 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
         pdf.set_font("Arial", size=11)
 
     def safe_text(s: str) -> str:
-        """유니코드 폰트를 못 쓸 때는 latin-1로 변환해서 한글 제거."""
         if use_unicode_font:
             return s.replace("\r", "")
         return s.encode("latin-1", "ignore").decode("latin-1")
 
-    # 너무 긴 한 줄(띄어쓰기 없는 문자열)을 강제로 잘라 주는 함수
     def split_long_line(line: str, max_chars: int = 80):
-        # 이미 공백이 있으면 fpdf가 알아서 잘라 주므로 그대로 사용
         if " " in line or len(line) <= max_chars:
             return [line]
-        # 공백이 거의 없으면 max_chars 단위로 강제 쪼개기
         chunks = []
         start = 0
         while start < len(line):
@@ -468,31 +513,25 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
             start += max_chars
         return chunks
 
-    # 제목
     pdf.set_font_size(14)
     try:
         pdf.multi_cell(0, 8, safe_text(title))
     except FPDFException:
-        # 혹시 여기서도 문제가 나면 제목을 아주 짧게 잘라서라도 넣기
         pdf.multi_cell(0, 8, safe_text(title[:40]))
     pdf.ln(4)
     pdf.set_font_size(11)
 
-    # 본문
     for raw_line in text.split("\n"):
         for subline in split_long_line(raw_line, max_chars=80):
             line = safe_text(subline)
             try:
                 pdf.multi_cell(0, 6, line)
             except FPDFException:
-                # 그래도 안 되면 더 잘라서라도 넣고 넘어간다
                 try:
                     pdf.multi_cell(0, 6, line[:40])
                 except FPDFException:
-                    # 이 줄은 포기하고 다음 줄로
                     continue
 
-    # bytes로 반환
     pdf_bytes = pdf.output(dest="S").encode("latin1")
     return pdf_bytes
 
@@ -506,7 +545,6 @@ def main():
     st.title(APP_TITLE)
     st.caption("함창고 학생부 분석 & 활동 계획 보조 시스템 (내부용)")
 
-    # 세션 상태 초기화
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
     if "analysis_data" not in st.session_state:
@@ -514,7 +552,7 @@ def main():
     if "plan_markdown" not in st.session_state:
         st.session_state.plan_markdown = None
 
-    # 1차 비밀번호 접근 제어
+    # 1차 비밀번호
     if not st.session_state.authenticated:
         st.subheader("접속 비밀번호 입력")
         pw = st.text_input("접속 비밀번호를 입력하세요.", type="password")
@@ -526,7 +564,6 @@ def main():
                 st.error("비밀번호가 올바르지 않습니다.")
         st.stop()
 
-    # 메인 UI
     st.info(
         """
         ⚠️ 이 시스템은 교사용 내부 도구입니다.
@@ -537,14 +574,12 @@ def main():
         """
     )
 
-    # 기초 정보 입력
+    # 1. 기초 정보
     st.subheader("1. 기초 정보 입력")
 
     students = load_students()
-
     col1, col2, col3 = st.columns(3)
 
-    # 학번/이름 선택
     with col1:
         if not students:
             st.error("students.csv 파일에서 학생 목록을 불러오지 못했습니다. 학번,이름 형식으로 CSV를 만들어 주세요.")
@@ -553,7 +588,6 @@ def main():
         else:
             options = [f"{s['id']} {s['name']}" for s in students]
             selected_label = st.selectbox("본인 학번/이름 선택", ["선택하세요"] + options)
-
             if selected_label == "선택하세요":
                 student_name = ""
                 student_id = ""
@@ -568,14 +602,13 @@ def main():
     with col3:
         major = st.text_input("희망 학과 (예: 기계공학과, 국어교육과 등)")
 
-    # PDF 업로드
+    # 2. PDF 업로드
     st.subheader("2. 학교생활기록부 PDF 업로드")
     uploaded_pdf = st.file_uploader("학교생활기록부 PDF 파일을 업로드하세요.", type=["pdf"])
-
     if uploaded_pdf is not None:
         st.success("PDF 업로드 완료")
 
-    # API 사용 설정
+    # 3. API 설정
     st.subheader("3. GPT API 사용 설정")
 
     api_mode = st.radio(
@@ -593,14 +626,11 @@ def main():
             - 예: `OPENAI_API_KEY` 환경 변수 또는 `st.secrets["OPENAI_API_KEY"]`
             """
         )
-        teacher_pw = st.text_input(
-            "교사용 분석 기능 활성화를 위한 추가 비밀번호", type="password"
-        )
+        teacher_pw = st.text_input("교사용 분석 기능 활성화를 위한 추가 비밀번호", type="password")
         if teacher_pw:
             TEACHER_PASSWORD = os.environ.get("TEACHER_PASSWORD", "teacher2025")
             if "TEACHER_PASSWORD" in st.secrets:
                 TEACHER_PASSWORD = st.secrets["TEACHER_PASSWORD"]
-
             if teacher_pw == TEACHER_PASSWORD:
                 st.success("교사 모드 활성화 완료. 서버에 저장된 API 키를 사용합니다.")
                 if "OPENAI_API_KEY" in st.secrets:
@@ -621,10 +651,9 @@ def main():
     if openai_api_key is None:
         st.warning("⚠️ 아직 유효한 API 키가 설정되지 않았습니다.")
 
-    # 학생부 분석 실행
+    # 4. 학생부 분석 실행
     st.subheader("4. 학생부 분석 실행")
 
-    # 학번+이름을 합친 key로 사용 횟수 관리
     usage_key = f"{student_id}_{student_name}" if 'student_id' in locals() and student_id and student_name else ""
 
     if student_name:
@@ -643,7 +672,6 @@ def main():
         elif not can_use_analysis(usage_key):
             st.error(f"'{student_name}({student_id})' 기준으로는 이미 {MAX_USES_PER_NAME}회 분석을 사용했습니다.")
         else:
-            # 1) PDF 텍스트 추출 (모든 페이지 사용)
             with st.spinner("PDF에서 텍스트를 추출하는 중입니다..."):
                 pdf_text = extract_text_from_pdf(uploaded_pdf)
                 if not pdf_text:
@@ -656,7 +684,6 @@ def main():
                 original_len = len(pdf_text)
                 st.caption(f"추출된 텍스트 길이: 약 {original_len}자")
 
-            # 2) GPT 분석
             client = get_openai_client(openai_api_key)
             if client is None:
                 st.stop()
@@ -669,14 +696,13 @@ def main():
                 increase_usage(usage_key)
                 st.success("학생부 분석이 완료되었습니다.")
 
-    # 분석 결과 표시
+    # 5. 분석 결과 표시
     if st.session_state.analysis_data:
         analysis_data = st.session_state.analysis_data
         st.subheader("5. 분석 결과")
 
         tabs = st.tabs(["종합 요약", "세부 영역 분석", "독서 활동", "추천 활동"])
 
-        # 탭 1: 종합 요약
         with tabs[0]:
             st.markdown("### 학생 종합 요약")
             summary = analysis_data.get("analysis", {}).get("summary", "")
@@ -695,7 +721,6 @@ def main():
             if keywords:
                 st.write(", ".join(keywords))
 
-        # 탭 2: 세부 영역
         with tabs[1]:
             st.markdown("### 창의적체험활동")
             st.write(analysis_data.get("sections", {}).get("creative_activities", ""))
@@ -706,7 +731,6 @@ def main():
             st.markdown("### 행동특성 및 종합의견")
             st.write(analysis_data.get("sections", {}).get("behavior", ""))
 
-        # 탭 3: 독서 활동
         with tabs[2]:
             st.markdown("### 독서 활동 정리")
             reading = analysis_data.get("sections", {}).get("reading", {})
@@ -730,7 +754,6 @@ def main():
             for rb in re_en.get("related_books", []):
                 st.markdown(f"- **{rb.get('title','')}**: {rb.get('reason','')}")
 
-        # 탭 4: 추천 활동 선택
         with tabs[3]:
             st.markdown("### 추천 활동 중 원하는 것 선택")
 
@@ -795,7 +818,7 @@ def main():
                         st.session_state.plan_markdown = plan_markdown
                         st.success("실시 계획 및 예시 문구 생성 완료!")
 
-    # 실시 계획 / 예시 문구 결과 표시 & PDF 생성
+    # 6. 최종 결과 및 PDF
     if st.session_state.plan_markdown or st.session_state.analysis_data:
         st.subheader("6. 최종 결과 및 PDF 다운로드")
 
