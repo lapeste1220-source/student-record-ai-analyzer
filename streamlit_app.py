@@ -6,6 +6,7 @@ from io import BytesIO
 from openai import OpenAI
 from pypdf import PdfReader
 from fpdf import FPDF
+import csv  # ← 학번/이름 선택을 위한 CSV 사용
 
 
 # =========================
@@ -17,6 +18,7 @@ ACCESS_PASSWORD = "hamchang2025"  # 1차 보안 비밀번호
 USAGE_LOG_FILE = "usage_log.json"
 MAX_USES_PER_NAME = 2
 KOREAN_FONT_FILE = "NanumGothic.ttf"  # 같은 폴더에 폰트 파일 넣어두기
+STUDENTS_FILE = "students.csv"  # 학번/이름 목록 CSV
 
 
 # =========================
@@ -42,27 +44,55 @@ def save_usage_log(log):
         st.error(f"사용 이력 저장 중 오류: {e}")
 
 
-def can_use_analysis(student_name: str) -> bool:
-    """이름별로 최대 MAX_USES_PER_NAME회까지 허용."""
-    if not student_name:
+def can_use_analysis(student_key: str) -> bool:
+    """이름/학번을 합친 key 기준으로 최대 MAX_USES_PER_NAME회까지 허용."""
+    if not student_key:
         return False
     log = load_usage_log()
-    current = log.get(student_name, 0)
+    current = log.get(student_key, 0)
     return current < MAX_USES_PER_NAME
 
 
-def increase_usage(student_name: str):
-    if not student_name:
+def increase_usage(student_key: str):
+    if not student_key:
         return
     log = load_usage_log()
-    current = log.get(student_name, 0)
-    log[student_name] = current + 1
+    current = log.get(student_key, 0)
+    log[student_key] = current + 1
     save_usage_log(log)
 
 
-def get_usage_count(student_name: str) -> int:
+def get_usage_count(student_key: str) -> int:
     log = load_usage_log()
-    return log.get(student_name, 0)
+    return log.get(student_key, 0)
+
+
+# =========================
+# 유틸 함수: 학생 목록 로드
+# =========================
+
+def load_students():
+    """
+    students.csv에서 학번/이름 목록을 불러온다.
+    CSV 형식 예시:
+    학번,이름
+    10101,김가은
+    10102,박호준
+    """
+    students = []
+    if not os.path.exists(STUDENTS_FILE):
+        return students
+    try:
+        with open(STUDENTS_FILE, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                students.append({
+                    "id": row.get("학번", "").strip(),
+                    "name": row.get("이름", "").strip(),
+                })
+    except Exception as e:
+        st.error(f"학생 목록을 불러오는 중 오류: {e}")
+    return students
 
 
 # =========================
@@ -397,9 +427,29 @@ def main():
     # 기초 정보 입력
     st.subheader("1. 기초 정보 입력")
 
+    students = load_students()
+
     col1, col2, col3 = st.columns(3)
+
+    # 학번/이름 선택
     with col1:
-        student_name = st.text_input("학생 성명")
+        if not students:
+            st.error("students.csv 파일에서 학생 목록을 불러오지 못했습니다. 학번,이름 형식으로 CSV를 만들어 주세요.")
+            student_name = ""
+            student_id = ""
+        else:
+            options = [f"{s['id']} {s['name']}" for s in students]
+            selected_label = st.selectbox("본인 학번/이름 선택", ["선택하세요"] + options)
+
+            if selected_label == "선택하세요":
+                student_name = ""
+                student_id = ""
+            else:
+                idx = options.index(selected_label)
+                student = students[idx]
+                student_name = student["name"]
+                student_id = student["id"]
+
     with col2:
         track = st.text_input("희망 계열 (예: 공학계열, 인문사회계열 등)")
     with col3:
@@ -435,18 +485,19 @@ def main():
             "교사용 분석 기능 활성화를 위한 추가 비밀번호", type="password"
         )
         if teacher_pw:
-            # 이 부분은 실제 운용 시, 환경 변수/시크릿으로 관리 권장
-            # 예시: st.secrets["TEACHER_PASSWORD"]
+            # 실제 운용 시, 환경 변수/시크릿으로 관리 권장
             TEACHER_PASSWORD = os.environ.get("TEACHER_PASSWORD", "teacher2025")
+            if "TEACHER_PASSWORD" in st.secrets:
+                TEACHER_PASSWORD = st.secrets["TEACHER_PASSWORD"]
+
             if teacher_pw == TEACHER_PASSWORD:
                 teacher_mode_ok = True
                 st.success("교사 모드 활성화 완료. 서버에 저장된 API 키를 사용합니다.")
                 # 환경 변수 또는 secrets에서 키 가져오기
-                openai_api_key = (
-                    st.secrets.get("OPENAI_API_KEY")
-                    if "OPENAI_API_KEY" in st.secrets
-                    else os.environ.get("OPENAI_API_KEY")
-                )
+                if "OPENAI_API_KEY" in st.secrets:
+                    openai_api_key = st.secrets["OPENAI_API_KEY"]
+                else:
+                    openai_api_key = os.environ.get("OPENAI_API_KEY")
             else:
                 st.error("교사용 비밀번호가 올바르지 않습니다.")
     else:
@@ -464,21 +515,24 @@ def main():
     # 학생부 분석 실행
     st.subheader("4. 학생부 분석 실행")
 
+    # 학번+이름을 합친 key로 사용 횟수 관리
+    usage_key = f"{student_id}_{student_name}" if locals().get("student_id") and student_name else ""
+
     if student_name:
-        used_count = get_usage_count(student_name)
-        st.caption(f"현재 '{student_name}' 이름으로 분석 실행 횟수: {used_count} / {MAX_USES_PER_NAME}")
+        used_count = get_usage_count(usage_key)
+        st.caption(f"현재 '{student_name}({student_id})' 기준 분석 실행 횟수: {used_count} / {MAX_USES_PER_NAME}")
 
     analyze_clicked = st.button("학생부 분석 실행")
 
     if analyze_clicked:
         if not student_name:
-            st.error("학생 성명을 입력해 주세요.")
+            st.error("학생 성명/학번을 선택해 주세요.")
         elif not uploaded_pdf:
             st.error("학교생활기록부 PDF 파일을 업로드해 주세요.")
         elif not openai_api_key:
             st.error("유효한 OpenAI API 키가 설정되어 있지 않습니다.")
-        elif not can_use_analysis(student_name):
-            st.error(f"'{student_name}' 이름으로는 이미 {MAX_USES_PER_NAME}회 분석을 사용했습니다.")
+        elif not can_use_analysis(usage_key):
+            st.error(f"'{student_name}({student_id})' 기준으로는 이미 {MAX_USES_PER_NAME}회 분석을 사용했습니다.")
         else:
             with st.spinner("PDF에서 텍스트를 추출하고, GPT-5로 학생부를 분석하는 중입니다..."):
                 pdf_text = extract_text_from_pdf(uploaded_pdf)
@@ -492,7 +546,7 @@ def main():
 
             if analysis_data:
                 st.session_state.analysis_data = analysis_data
-                increase_usage(student_name)
+                increase_usage(usage_key)
                 st.success("학생부 분석이 완료되었습니다.")
 
     # 분석 결과 표시
@@ -650,15 +704,17 @@ def main():
         full_text_for_pdf = analysis_text_block + "\n\n" + plan_text_block
 
         if full_text_for_pdf.strip():
+            # student_name이 없을 수도 있으니 방어
+            file_name = f"{student_name}_학생부분석.pdf" if locals().get("student_name") else "학생부분석.pdf"
             pdf_bytes = generate_pdf_from_text(
-                f"{student_name} 학생부 분석 및 활동 계획",
+                f"{student_name} 학생부 분석 및 활동 계획" if locals().get("student_name") else "학생부 분석 및 활동 계획",
                 full_text_for_pdf,
             )
 
             st.download_button(
                 label="결과 PDF 다운로드",
                 data=pdf_bytes,
-                file_name=f"{student_name}_학생부분석.pdf" if student_name else "학생부분석.pdf",
+                file_name=file_name,
                 mime="application/pdf",
             )
         else:
