@@ -279,7 +279,7 @@ def call_gpt_analysis(client, prompt: str):
     """학생부 분석 API 호출 (JSON 응답 기대)."""
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",  # 선생님 계정에서 사용 가능한 모델명으로 조정 가능
+            model="gpt-5",  # 선생님 계정에서 사용 가능한 모델명으로 조정 가능
             messages=[
                 {
                     "role": "system",
@@ -359,7 +359,7 @@ def build_plan_prompt(student_name, track, major, analysis_data, selected_activi
 def call_gpt_plan(client, prompt: str):
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-5",
             messages=[
                 {
                     "role": "system",
