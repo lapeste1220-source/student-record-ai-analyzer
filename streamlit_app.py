@@ -20,8 +20,7 @@ MAX_USES_PER_NAME = 2
 KOREAN_FONT_FILE = "NanumGothic.ttf"  # 같은 폴더에 폰트 파일 넣어두기
 STUDENTS_FILE = "students.csv"  # 학번/이름 목록 CSV
 
-# 길이/토큰 제한 (속도 문제 완화용)
-MAX_PDF_CHARS = 8000          # GPT에 보낼 텍스트는 앞에서 8,000자까지만 사용
+# 토큰 제한 (응답 길이만 제한 – 입력 길이는 전체 사용)
 MAX_COMPLETION_TOKENS = 2000  # GPT가 생성하는 최대 토큰 수
 
 
@@ -103,12 +102,11 @@ def load_students():
 # 유틸 함수: PDF 텍스트 추출
 # =========================
 
-def extract_text_from_pdf(uploaded_file, start_page_index: int = 1) -> str:
+def extract_text_from_pdf(uploaded_file) -> str:
     """
     텍스트 기반 PDF에서 텍스트를 추출.
     - Streamlit UploadedFile을 BytesIO로 감싸서 사용
-    - start_page_index부터 마지막 페이지까지 사용
-      (기본값 1 → 사람 기준 2페이지부터 끝까지)
+    - 모든 페이지(1쪽~마지막쪽) 사용
     """
     try:
         # UploadedFile → BytesIO
@@ -123,20 +121,10 @@ def extract_text_from_pdf(uploaded_file, start_page_index: int = 1) -> str:
             st.error("PDF에 페이지가 없습니다.")
             return ""
 
-        # 시작 페이지 인덱스 조정 (범위 초과 방지)
-        if num_pages > start_page_index:
-            start = start_page_index
-        else:
-            # 페이지 수가 2페이지 미만이면 첫 페이지부터 사용
-            start = 0
-
-        if start > 0:
-            st.caption(f"PDF는 총 {num_pages}쪽이며, {start+1}쪽부터 {num_pages}쪽까지 사용합니다.")
-        else:
-            st.caption(f"PDF는 총 {num_pages}쪽이며, 모든 페이지를 사용합니다.")
+        st.caption(f"PDF는 총 {num_pages}쪽이며, 1쪽부터 {num_pages}쪽까지 모두 사용합니다.")
 
         text = ""
-        for i in range(start, num_pages):
+        for i in range(num_pages):
             page = reader.pages[i]
             page_text = page.extract_text() or ""
             text += page_text + "\n"
@@ -177,8 +165,7 @@ def build_analysis_prompt(student_name, track, major, pdf_text):
 - 이름: {student_name}
 - 희망계열 및 학과: {track} / {major}
 
-아래는 이 학생의 고등학교 학교생활기록부 텍스트의 일부이다.
-(입력 길이 제한으로 인해 학생부의 일부만 제공될 수 있다.)
+아래는 이 학생의 고등학교 학교생활기록부 전체 텍스트이다.
 
 이 텍스트에서 다음 항목들을 최대한 충실하게 찾아 분석하라.
 
@@ -279,7 +266,7 @@ JSON 형식 (중괄호 포함 전체를 JSON으로만 출력, 다른 설명 문�
 - null 대신 빈 문자열 ""을 사용해라.
 - 텍스트에서 해당 정보를 찾기 어려우면, 추론 가능한 범위 내에서 작성하되, 과도하게 지어내지 말고 "추론"임을 간접적으로 드러내라.
 
-아래는 학교생활기록부 텍스트(일부)이다:
+아래는 학교생활기록부 전체 텍스트이다:
 
 ------------------학생부 텍스트 시작------------------
 {pdf_text}
@@ -292,7 +279,7 @@ def call_gpt_analysis(client, prompt: str):
     """학생부 분석 API 호출 (JSON 응답 기대)."""
     try:
         response = client.chat.completions.create(
-            model="gpt-5",  # 필요시 교사가 변경
+            model="gpt-4.1-mini",  # 선생님 계정에서 사용 가능한 모델명으로 조정 가능
             messages=[
                 {
                     "role": "system",
@@ -301,7 +288,8 @@ def call_gpt_analysis(client, prompt: str):
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
-            max_tokens=MAX_COMPLETION_TOKENS,
+            # 새 모델에서는 max_tokens 대신 max_completion_tokens 사용
+            max_completion_tokens=MAX_COMPLETION_TOKENS,
         )
         content = response.choices[0].message.content
         data = json.loads(content)
@@ -371,7 +359,7 @@ def build_plan_prompt(student_name, track, major, analysis_data, selected_activi
 def call_gpt_plan(client, prompt: str):
     try:
         response = client.chat.completions.create(
-            model="gpt-5",
+            model="gpt-4.1-mini",
             messages=[
                 {
                     "role": "system",
@@ -455,7 +443,7 @@ def main():
         """
         ⚠️ 이 시스템은 교사용 내부 도구입니다.
         - 접속 비밀번호: hamchang2025 (학생에게 공유 금지)
-        - 분석 및 활동 제안은 GPT-5 API를 사용합니다.
+        - 분석 및 활동 제안은 OpenAI GPT API를 사용합니다.
         - 교사 API 키 사용은 **추가 비밀번호 입력** 후 활성화됩니다.
         - 이름별 분석 실행 횟수 제한: 최대 2회
         """
@@ -500,7 +488,7 @@ def main():
         st.success("PDF 업로드 완료")
 
     # API 사용 설정
-    st.subheader("3. GPT-5 API 사용 설정")
+    st.subheader("3. GPT API 사용 설정")
 
     api_mode = st.radio(
         "API 사용 방식 선택",
@@ -567,26 +555,24 @@ def main():
         elif not can_use_analysis(usage_key):
             st.error(f"'{student_name}({student_id})' 기준으로는 이미 {MAX_USES_PER_NAME}회 분석을 사용했습니다.")
         else:
-            # 1) PDF 텍스트 추출 (2페이지부터 끝까지)
+            # 1) PDF 텍스트 추출 (모든 페이지 사용)
             with st.spinner("PDF에서 텍스트를 추출하는 중입니다..."):
-                pdf_text = extract_text_from_pdf(uploaded_pdf, start_page_index=1)
+                pdf_text = extract_text_from_pdf(uploaded_pdf)
                 if not pdf_text:
+                    st.error(
+                        "PDF에서 추출할 수 있는 텍스트가 없습니다. "
+                        "이미지(스캔) 형태의 학생부일 수 있습니다.\n"
+                        "글자 선택이 가능한 텍스트 기반 PDF로 다시 업로드해 주세요."
+                    )
                     st.stop()
                 original_len = len(pdf_text)
-                if original_len > MAX_PDF_CHARS:
-                    pdf_text = pdf_text[:MAX_PDF_CHARS]
-                    st.warning(
-                        f"추출된 텍스트가 매우 길어 앞부분 {MAX_PDF_CHARS}자만 GPT 분석에 사용합니다 "
-                        f"(원래 길이: 약 {original_len}자)."
-                    )
-                else:
-                    st.caption(f"추출된 텍스트 길이: 약 {original_len}자")
+                st.caption(f"추출된 텍스트 길이: 약 {original_len}자")
 
             # 2) GPT 분석
             client = get_openai_client(openai_api_key)
             if client is None:
                 st.stop()
-            with st.spinner("GPT-5로 학생부를 분석하는 중입니다..."):
+            with st.spinner("GPT로 학생부를 분석하는 중입니다..."):
                 prompt = build_analysis_prompt(student_name, track, major, pdf_text)
                 analysis_data = call_gpt_analysis(client, prompt)
 
@@ -612,7 +598,7 @@ def main():
             for s in analysis_data.get("analysis", {}).get("strengths", []):
                 st.markdown(f"- {s}")
 
-            st.markmarkdown("### 보완 필요 영역")
+            st.markdown("### 보완 필요 영역")
             for w in analysis_data.get("analysis", {}).get("weaknesses", []):
                 st.markdown(f"- {w}")
 
