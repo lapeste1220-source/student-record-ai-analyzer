@@ -383,27 +383,72 @@ def call_gpt_plan(client, prompt: str):
 def generate_pdf_from_text(title: str, text: str) -> bytes:
     """
     전체 결과(분석 + 계획)를 하나의 텍스트로 받아 PDF로 변환.
-    한글 출력을 위해 TTF 폰트 필요.
+    - NANUMGOTHIC.TTF가 있으면 한글까지 정상 출력
+    - 너무 긴 줄은 강제로 잘라서 fpdf 예외를 방지
     """
     pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
+    use_unicode_font = True
+
     try:
+        # 한글 폰트 사용 (파일명은 실제 업로드된 이름과 동일해야 함)
         pdf.add_font("KOREAN", "", KOREAN_FONT_FILE, uni=True)
-        pdf.set_font("KOREAN", size=12)
+        pdf.set_font("KOREAN", size=11)
     except Exception:
-        st.warning(f"한글 폰트 로딩에 실패했습니다. 폰트 파일({KOREAN_FONT_FILE})을 확인해 주세요. 기본 폰트로 출력합니다.")
-        pdf.set_font("Arial", size=12)
+        # 폰트 로딩 실패 → 기본 폰트 + ASCII 필터링
+        use_unicode_font = False
+        st.warning(
+            f"한글 폰트 로딩에 실패했습니다. 폰트 파일({KOREAN_FONT_FILE})을 "
+            "앱 실행 디렉터리에 추가하면 한글이 정상 출력됩니다. "
+            "현재 PDF는 영어/숫자만 포함됩니다."
+        )
+        pdf.set_font("Arial", size=11)
+
+    def safe_text(s: str) -> str:
+        """유니코드 폰트를 못 쓸 때는 latin-1로 변환해서 한글 제거."""
+        if use_unicode_font:
+            return s.replace("\r", "")
+        return s.encode("latin-1", "ignore").decode("latin-1")
+
+    # 너무 긴 한 줄(띄어쓰기 없는 문자열)을 강제로 잘라 주는 함수
+    def split_long_line(line: str, max_chars: int = 80):
+        # 이미 공백이 있으면 fpdf가 알아서 잘라 주므로 그대로 사용
+        if " " in line or len(line) <= max_chars:
+            return [line]
+        # 공백이 거의 없으면 max_chars 단위로 강제 쪼개기
+        chunks = []
+        start = 0
+        while start < len(line):
+            chunks.append(line[start:start + max_chars])
+            start += max_chars
+        return chunks
 
     # 제목
-    pdf.set_font_size(16)
-    pdf.multi_cell(0, 10, title)
+    pdf.set_font_size(14)
+    try:
+        pdf.multi_cell(0, 8, safe_text(title))
+    except FPDFException:
+        # 혹시 여기서도 문제가 나면 제목을 아주 짧게 잘라서라도 넣기
+        pdf.multi_cell(0, 8, safe_text(title[:40]))
     pdf.ln(4)
-    pdf.set_font_size(12)
+    pdf.set_font_size(11)
 
     # 본문
-    for line in text.split("\n"):
-        pdf.multi_cell(0, 7, line)
+    for raw_line in text.split("\n"):
+        for subline in split_long_line(raw_line, max_chars=80):
+            line = safe_text(subline)
+            try:
+                pdf.multi_cell(0, 6, line)
+            except FPDFException:
+                # 그래도 안 되면 더 잘라서라도 넣고 넘어간다
+                try:
+                    pdf.multi_cell(0, 6, line[:40])
+                except FPDFException:
+                    # 이 줄은 포기하고 다음 줄로
+                    continue
+
     # bytes로 반환
     pdf_bytes = pdf.output(dest="S").encode("latin1")
     return pdf_bytes
