@@ -8,6 +8,7 @@ from pypdf import PdfReader
 from fpdf import FPDF
 from fpdf.errors import FPDFException   # ⬅ 이 줄 추가
 import csv  # 학번/이름 선택을 위한 CSV 사용
+import ast
 
 
 # =========================
@@ -278,6 +279,36 @@ JSON 형식 (중괄호 포함 전체를 JSON으로만 출력, 다른 설명 문�
 
 def call_gpt_analysis(client, prompt: str):
     """학생부 분석 API 호출 (JSON 응답 기대)."""
+
+    def parse_json_like(content: str):
+        """GPT가 준 문자열을 최대한 유연하게 JSON/dict로 바꿔본다."""
+        text = content.strip()
+
+        # 1) ```json ... ``` 같은 코드블록이면 안쪽만 꺼내기
+        if text.startswith("```"):
+            # 마지막 ``` 위치 찾기
+            end_fence = text.rfind("```")
+            if end_fence > 0:
+                text = text.strip("`")
+            # 그래도 남아 있으면 중괄호 부분만 뽑기
+        # 2) 중괄호 구간만 추출
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and start < end:
+            text = text[start:end + 1]
+
+        # 3) 먼저 json으로 시도
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+
+        # 4) 안 되면 Python dict 리터럴로 해석 시도 (trailing comma 등 허용)
+        try:
+            return ast.literal_eval(text)
+        except Exception:
+            return None
+
     try:
         response = client.chat.completions.create(
             model="gpt-5",  # 선생님 계정에서 사용 가능한 모델명
@@ -290,35 +321,25 @@ def call_gpt_analysis(client, prompt: str):
             ],
             # gpt-5는 temperature 변경 불가 → 기본값 사용
             max_completion_tokens=MAX_COMPLETION_TOKENS,
-            # 가능하면 JSON만 내놓게 강제
+            # 가능하면 JSON만 내놓게 강제 (지원되는 모델이면 아주 깔끔하게 나옴)
             response_format={"type": "json_object"},
         )
 
-        content = response.choices[0].message.content
+        content = response.choices[0].message.content or ""
 
-        # 1차: 그대로 JSON 파싱 시도
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            # 2차: 앞뒤에 설명이 붙었을 경우, 중괄호 부분만 잘라서 파싱
-            start = content.find("{")
-            end = content.rfind("}")
-            if start != -1 and end != -1 and start < end:
-                try:
-                    cleaned = content[start:end + 1]
-                    return json.loads(cleaned)
-                except Exception:
-                    pass
-
-            # 그래도 안 되면 디버깅용으로 원문을 화면에 보여주고 에러 처리
-            st.error("GPT 응답을 JSON으로 해석하는 데 실패했습니다. 프롬프트를 조금 줄여보거나 다시 시도해 주세요.")
+        data = parse_json_like(content)
+        if data is None:
+            st.error("GPT 응답을 JSON으로 해석하는 데 실패했습니다. 아래 원본 응답을 참고해 프롬프트를 조정해 주세요.")
             with st.expander("디버깅용: GPT 원본 응답 보기"):
                 st.text(content)
             return None
 
+        return data
+
     except Exception as e:
         st.error(f"학생부 분석 중 오류가 발생했습니다: {e}")
         return None
+
 
 
 
