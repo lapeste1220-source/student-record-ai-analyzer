@@ -6,6 +6,7 @@ from io import BytesIO
 from openai import OpenAI
 from pypdf import PdfReader
 from fpdf import FPDF
+from fpdf.errors import FPDFException   # ⬅ 이 줄 추가
 import csv  # 학번/이름 선택을 위한 CSV 사용
 
 
