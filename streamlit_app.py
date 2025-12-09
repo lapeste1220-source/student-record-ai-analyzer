@@ -17,7 +17,7 @@ APP_TITLE = "함창고 학생부 분석 시스템"
 ACCESS_PASSWORD = "hamchang2025"  # 1차 보안 비밀번호
 USAGE_LOG_FILE = "usage_log.json"
 MAX_USES_PER_NAME = 2
-KOREAN_FONT_FILE = "NanumGothic.ttf"  # 같은 폴더에 폰트 파일 넣어두기
+KOREAN_FONT_FILE = "NANUMGOTHIC.TTF"  # 같은 폴더에 폰트 파일 넣어두기
 STUDENTS_FILE = "students.csv"  # 학번/이름 목록 CSV
 
 # 토큰 제한 (응답 길이만 제한 – 입력 길이는 전체 사용)
