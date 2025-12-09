@@ -1,107 +1,62 @@
-import json
-from openai import OpenAI
-
-
-# =====================================================
-# 1) 종합 GPT 분석 (학생부 분석 전체)
-# =====================================================
-def run_gpt_analysis(client, sections, target_univ, target_major, target_values):
-
+def run_gpt_analysis(client, sections, target_major):
     prompt = f"""
-다음은 학생부 주요 항목입니다:
+    너는 대한민국 입시 전문가이자 학생부 분석 전문 컨설턴트이다.
 
-{json.dumps(sections, ensure_ascii=False, indent=2)}
+    아래 학생의 생기부 내용을 읽고,
+    희망 학과: {target_major}
+    에 맞춘 종합 분석을 4가지로 나누어 작성하라.
 
-희망 학과: {target_major}
+    1) 전공 적합성 종합 평가
+    2) 학생의 강점 및 역량 분석
+    3) 비교과·세특에서 드러나는 전공 관련 패턴 분석
+    4) 추천 가능한 심화 탐구 또는 프로젝트 제안
+    5) 생기부 전체 특징 기반 마인드맵(JSON 형식)
 
-학생부 분석을 아래 형식의 **JSON**으로 정확히 출력하세요.
+    ---------------------
+    [생기부 내용]
+    {sections}
+    ---------------------
+    """
 
-{
-  "summary": "한 줄 요약",
-  "strengths": ["강점1", "강점2", "강점3"],
-  "weaknesses": ["약점1", "약점2", "약점3"],
-  "recommendations": {
-      "projects": ["프로젝트 제안 1", "프로젝트 제안 2"],
-      "reports": ["보고서 주제 1", "보고서 주제 2"],
-      "books": ["추천도서1", "추천도서2"],
-      "leadership": ["리더십 활동 제안"]
-  },
-  "mindmap": {
-      "summary": "요약",
-      "strengths": ["강점1", "강점2"],
-      "weaknesses": ["약점1", "약점2"],
-      "activities": {
-          "projects": ["프로젝트1"],
-          "reading": ["독서1"],
-          "extracurricular": ["비교과1"]
-      }
-  }
-}
-
-위 JSON 구조 이외의 설명, 문장은 절대로 넣지 마세요.
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-5",
-        messages=[
-            {"role": "user", "content": prompt}
-        ]
-    )
-
-    raw = response.choices[0].message["content"].strip()
-
-    # JSON 파싱 시도
-    try:
-        data = json.loads(raw)
-        return data
-    except:
-        # 파싱 실패하면 최소한의 구조로 반환 (앱 크래시 방지)
-        return {
-            "summary": "정보 분석 중 오류 발생",
-            "strengths": [],
-            "weaknesses": [],
-            "recommendations": {},
-            "mindmap": {}
-        }
-
-
-
-# =====================================================
-# 2) 책 Summary 분석
-# =====================================================
-def summarize_book(client, book):
-
-    prompt = f"""
-도서명: {book['title']}
-저자: {book['author']}
-학생 독서 기록: {book['student_note']}
-
-아래 형식의 **JSON**으로 정확하게 출력하세요:
-
-{
-  "summary_text": ["핵심 요약1", "핵심 요약2", "핵심 요약3"],
-  "major_links": ["전공 연계1", "전공 연계2", "전공 연계3"],
-  "projects": ["프로젝트 제안1", "프로젝트 제안2"]
-}
-
-위 JSON 형식을 반드시 지키고, 설명 문장은 절대로 추가하지 마세요.
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-5",
+    res = client.chat.completions.create(
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    raw = response.choices[0].message["content"].strip()
+    text = res.choices[0].message.content
 
-    # JSON 파싱
-    try:
-        data = json.loads(raw)
-        return data
-    except:
-        # 실패 시 최소 구조 제공
-        return {
-            "summary_text": ["요약 생성 실패"],
-            "major_links": [],
-            "projects": []
-        }
+    return {
+        "overall": text,
+        "strengths": text,
+        "patterns": text,
+        "projects": text,
+        "mindmap": "{}"
+    }
+
+
+def summarize_book(client, book):
+    prompt = f"""
+    아래 도서에 대해 생기부 독서활동 관점에서 분석하라.
+
+    도서명: {book['title']}
+    저자: {book['author']}
+    학생 메모: {book['student_note']}
+
+    출력 형식:
+    1) 핵심 요약 bullet 5개
+    2) 전공 연계 포인트 5개
+    3) 실천 가능한 프로젝트 3개
+    """
+
+    res = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    content = res.choices[0].message.content.split("\n")
+
+    return {
+        "summary_text": content[:5],
+        "major_links": content[5:10],
+        "projects": content[10:13]
+    }
