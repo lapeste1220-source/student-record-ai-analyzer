@@ -514,16 +514,16 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
                     # 이 줄은 포기하고 다음 줄로
                     continue
 
-        # bytes로 반환 (fpdf / fpdf2 모두 대응)
-        result = pdf.output(dest="S")
-        if isinstance(result, str):
-            # 옛날 fpdf처럼 str을 반환하는 경우
-            pdf_bytes = result.encode("latin1")
-        else:
+    # bytes로 반환 (fpdf / fpdf2 모두 대응)
+    result = pdf.output(dest="S")
+    if isinstance(result, str):
+        # 옛날 fpdf처럼 str을 반환하는 경우
+        pdf_bytes = result.encode("latin1")
+    else:
         # fpdf2처럼 bytearray / bytes를 반환하는 경우
         pdf_bytes = bytes(result)
 
-        return pdf_bytes
+    return pdf_bytes
 
 
 
