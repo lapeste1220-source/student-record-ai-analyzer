@@ -20,8 +20,8 @@ MAX_USES_PER_NAME = 2
 KOREAN_FONT_FILE = "NanumGothic.ttf"  # 같은 폴더에 폰트 파일 넣어두기
 STUDENTS_FILE = "students.csv"  # 학번/이름 목록 CSV
 
-# ⚠ 길이/토큰 제한 (속도 문제 해결용)
-MAX_PDF_CHARS = 8000          # PDF에서 앞부분 8,000자만 사용
+# 길이/토큰 제한 (속도 문제 완화용)
+MAX_PDF_CHARS = 8000          # GPT에 보낼 텍스트는 앞에서 8,000자까지만 사용
 MAX_COMPLETION_TOKENS = 2000  # GPT가 생성하는 최대 토큰 수
 
 
@@ -103,35 +103,43 @@ def load_students():
 # 유틸 함수: PDF 텍스트 추출
 # =========================
 
-def extract_text_from_pdf(uploaded_file, max_pages=5) -> str:
+def extract_text_from_pdf(uploaded_file, start_page_index: int = 1) -> str:
     """
     텍스트 기반 PDF에서 텍스트를 추출.
-    - BytesIO로 감싸서 읽기
-    - 앞의 max_pages 페이지만 사용 (기본 5페이지)
+    - Streamlit UploadedFile을 BytesIO로 감싸서 사용
+    - start_page_index부터 마지막 페이지까지 사용
+      (기본값 1 → 사람 기준 2페이지부터 끝까지)
     """
     try:
-        # Streamlit UploadedFile → BytesIO로 복사
+        # UploadedFile → BytesIO
         uploaded_file.seek(0)
         data = uploaded_file.read()
         buffer = BytesIO(data)
 
-        from pypdf import PdfReader
         reader = PdfReader(buffer)
-
         num_pages = len(reader.pages)
-        use_pages = min(num_pages, max_pages)
+
+        if num_pages == 0:
+            st.error("PDF에 페이지가 없습니다.")
+            return ""
+
+        # 시작 페이지 인덱스 조정 (범위 초과 방지)
+        if num_pages > start_page_index:
+            start = start_page_index
+        else:
+            # 페이지 수가 2페이지 미만이면 첫 페이지부터 사용
+            start = 0
+
+        if start > 0:
+            st.caption(f"PDF는 총 {num_pages}쪽이며, {start+1}쪽부터 {num_pages}쪽까지 사용합니다.")
+        else:
+            st.caption(f"PDF는 총 {num_pages}쪽이며, 모든 페이지를 사용합니다.")
 
         text = ""
-        for i in range(use_pages):
+        for i in range(start, num_pages):
             page = reader.pages[i]
             page_text = page.extract_text() or ""
             text += page_text + "\n"
-
-        if num_pages > use_pages:
-            st.warning(
-                f"PDF 페이지가 {num_pages}쪽이라서, 속도 문제를 피하기 위해 "
-                f"앞 {use_pages}쪽만 사용합니다."
-            )
 
         return text.strip()
 
@@ -146,7 +154,6 @@ def extract_text_from_pdf(uploaded_file, max_pages=5) -> str:
 
 def get_openai_client(api_key: str):
     try:
-        # timeout을 적당히 지정해도 됨 (초 단위)
         client = OpenAI(api_key=api_key)
         return client
     except Exception as e:
@@ -171,7 +178,7 @@ def build_analysis_prompt(student_name, track, major, pdf_text):
 - 희망계열 및 학과: {track} / {major}
 
 아래는 이 학생의 고등학교 학교생활기록부 텍스트의 일부이다.
-(입력 길이 제한으로 인해 학생부의 앞부분 위주로만 제공될 수 있다.)
+(입력 길이 제한으로 인해 학생부의 일부만 제공될 수 있다.)
 
 이 텍스트에서 다음 항목들을 최대한 충실하게 찾아 분석하라.
 
@@ -214,7 +221,7 @@ JSON 형식 (중괄호 포함 전체를 JSON으로만 출력, 다른 설명 문�
       "학생의 강점 2",
       "학생의 강점 3"
     ],
-      "weaknesses": [
+    "weaknesses": [
       "학생의 보완 필요 영역 1",
       "학생의 보완 필요 영역 2"
     ],
@@ -272,7 +279,7 @@ JSON 형식 (중괄호 포함 전체를 JSON으로만 출력, 다른 설명 문�
 - null 대신 빈 문자열 ""을 사용해라.
 - 텍스트에서 해당 정보를 찾기 어려우면, 추론 가능한 범위 내에서 작성하되, 과도하게 지어내지 말고 "추론"임을 간접적으로 드러내라.
 
-아래는 학교생활기록부 텍스트 (앞부분 일부)이다:
+아래는 학교생활기록부 텍스트(일부)이다:
 
 ------------------학생부 텍스트 시작------------------
 {pdf_text}
@@ -294,7 +301,7 @@ def call_gpt_analysis(client, prompt: str):
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
-            max_tokens=MAX_COMPLETION_TOKENS,  # 응답 길이 제한
+            max_tokens=MAX_COMPLETION_TOKENS,
         )
         content = response.choices[0].message.content
         data = json.loads(content)
@@ -396,8 +403,7 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
     try:
         pdf.add_font("KOREAN", "", KOREAN_FONT_FILE, uni=True)
         pdf.set_font("KOREAN", size=12)
-    except Exception as e:
-        # 폰트 로딩 실패 시 기본 폰트로라도 출력
+    except Exception:
         st.warning(f"한글 폰트 로딩에 실패했습니다. 폰트 파일({KOREAN_FONT_FILE})을 확인해 주세요. 기본 폰트로 출력합니다.")
         pdf.set_font("Arial", size=12)
 
@@ -503,7 +509,6 @@ def main():
     )
 
     openai_api_key = None
-    teacher_mode_ok = False
 
     if api_mode == "교사 API 사용 (추천)":
         st.markdown(
@@ -516,15 +521,12 @@ def main():
             "교사용 분석 기능 활성화를 위한 추가 비밀번호", type="password"
         )
         if teacher_pw:
-            # 실제 운용 시, 환경 변수/시크릿으로 관리 권장
             TEACHER_PASSWORD = os.environ.get("TEACHER_PASSWORD", "teacher2025")
             if "TEACHER_PASSWORD" in st.secrets:
                 TEACHER_PASSWORD = st.secrets["TEACHER_PASSWORD"]
 
             if teacher_pw == TEACHER_PASSWORD:
-                teacher_mode_ok = True
                 st.success("교사 모드 활성화 완료. 서버에 저장된 API 키를 사용합니다.")
-                # 환경 변수 또는 secrets에서 키 가져오기
                 if "OPENAI_API_KEY" in st.secrets:
                     openai_api_key = st.secrets["OPENAI_API_KEY"]
                 else:
@@ -565,24 +567,20 @@ def main():
         elif not can_use_analysis(usage_key):
             st.error(f"'{student_name}({student_id})' 기준으로는 이미 {MAX_USES_PER_NAME}회 분석을 사용했습니다.")
         else:
-            # 1) PDF 텍스트 추출
-        with st.spinner("PDF에서 텍스트를 추출하는 중입니다..."):
-            pdf_text = extract_text_from_pdf(uploaded_pdf, max_pages=5)
-            if not pdf_text:
-                st.stop()
-            original_len = len(pdf_text)
-            st.caption(f"추출된 텍스트 길이: 약 {original_len}자")
+            # 1) PDF 텍스트 추출 (2페이지부터 끝까지)
+            with st.spinner("PDF에서 텍스트를 추출하는 중입니다..."):
+                pdf_text = extract_text_from_pdf(uploaded_pdf, start_page_index=1)
                 if not pdf_text:
                     st.stop()
                 original_len = len(pdf_text)
                 if original_len > MAX_PDF_CHARS:
                     pdf_text = pdf_text[:MAX_PDF_CHARS]
                     st.warning(
-                        f"PDF 텍스트가 매우 길어 앞부분 {MAX_PDF_CHARS}자만 사용했습니다 "
+                        f"추출된 텍스트가 매우 길어 앞부분 {MAX_PDF_CHARS}자만 GPT 분석에 사용합니다 "
                         f"(원래 길이: 약 {original_len}자)."
                     )
                 else:
-                    st.caption(f"PDF 텍스트 길이: 약 {original_len}자")
+                    st.caption(f"추출된 텍스트 길이: 약 {original_len}자")
 
             # 2) GPT 분석
             client = get_openai_client(openai_api_key)
@@ -614,7 +612,7 @@ def main():
             for s in analysis_data.get("analysis", {}).get("strengths", []):
                 st.markdown(f"- {s}")
 
-            st.markdown("### 보완 필요 영역")
+            st.markmarkdown("### 보완 필요 영역")
             for w in analysis_data.get("analysis", {}).get("weaknesses", []):
                 st.markdown(f"- {w}")
 
@@ -752,7 +750,6 @@ def main():
         full_text_for_pdf = analysis_text_block + "\n\n" + plan_text_block
 
         if full_text_for_pdf.strip():
-            # student_name이 없을 수도 있으니 방어
             file_name = f"{student_name}_학생부분석.pdf" if 'student_name' in locals() and student_name else "학생부분석.pdf"
             pdf_bytes = generate_pdf_from_text(
                 f"{student_name} 학생부 분석 및 활동 계획" if 'student_name' in locals() and student_name else "학생부 분석 및 활동 계획",
