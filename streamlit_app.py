@@ -282,15 +282,15 @@ def call_gpt_analysis(client, prompt: str):
 
     def parse_json_like(content: str):
         """GPT가 준 문자열을 최대한 유연하게 JSON/dict로 바꿔본다."""
-        text = content.strip()
+        text = (content or "").strip()
 
         # 1) ```json ... ``` 같은 코드블록이면 안쪽만 꺼내기
         if text.startswith("```"):
-            # 마지막 ``` 위치 찾기
             end_fence = text.rfind("```")
             if end_fence > 0:
+                # 앞뒤 ``` 제거
                 text = text.strip("`")
-            # 그래도 남아 있으면 중괄호 부분만 뽑기
+
         # 2) 중괄호 구간만 추출
         start = text.find("{")
         end = text.rfind("}")
@@ -303,7 +303,7 @@ def call_gpt_analysis(client, prompt: str):
         except Exception:
             pass
 
-        # 4) 안 되면 Python dict 리터럴로 해석 시도 (trailing comma 등 허용)
+        # 4) 안 되면 Python dict 리터럴로 해석 시도
         try:
             return ast.literal_eval(text)
         except Exception:
@@ -319,14 +319,19 @@ def call_gpt_analysis(client, prompt: str):
                 },
                 {"role": "user", "content": prompt},
             ],
-            # gpt-5는 temperature 변경 불가 → 기본값 사용
             max_completion_tokens=MAX_COMPLETION_TOKENS,
-            # 가능하면 JSON만 내놓게 강제 (지원되는 모델이면 아주 깔끔하게 나옴)
             response_format={"type": "json_object"},
         )
 
-        content = response.choices[0].message.content or ""
+        msg = response.choices[0].message
 
+        # ✅ 1순위: 라이브러리가 이미 파싱해 준 JSON 사용
+        parsed = getattr(msg, "parsed", None)
+        if parsed is not None:
+            return parsed
+
+        # ✅ 2순위: content 문자열에서 직접 파싱 (혹시 response_format을 무시한 경우)
+        content = getattr(msg, "content", "") or ""
         data = parse_json_like(content)
         if data is None:
             st.error("GPT 응답을 JSON으로 해석하는 데 실패했습니다. 아래 원본 응답을 참고해 프롬프트를 조정해 주세요.")
@@ -339,8 +344,6 @@ def call_gpt_analysis(client, prompt: str):
     except Exception as e:
         st.error(f"학생부 분석 중 오류가 발생했습니다: {e}")
         return None
-
-
 
 
 def build_plan_prompt(student_name, track, major, analysis_data, selected_activities):
