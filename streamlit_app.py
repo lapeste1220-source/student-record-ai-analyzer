@@ -103,15 +103,38 @@ def load_students():
 # 유틸 함수: PDF 텍스트 추출
 # =========================
 
-def extract_text_from_pdf(uploaded_file) -> str:
-    """텍스트 기반 PDF에서 텍스트를 추출 (이미지 스캔 PDF는 어려울 수 있음)."""
+def extract_text_from_pdf(uploaded_file, max_pages=5) -> str:
+    """
+    텍스트 기반 PDF에서 텍스트를 추출.
+    - BytesIO로 감싸서 읽기
+    - 앞의 max_pages 페이지만 사용 (기본 5페이지)
+    """
     try:
-        reader = PdfReader(uploaded_file)
+        # Streamlit UploadedFile → BytesIO로 복사
+        uploaded_file.seek(0)
+        data = uploaded_file.read()
+        buffer = BytesIO(data)
+
+        from pypdf import PdfReader
+        reader = PdfReader(buffer)
+
+        num_pages = len(reader.pages)
+        use_pages = min(num_pages, max_pages)
+
         text = ""
-        for page in reader.pages:
+        for i in range(use_pages):
+            page = reader.pages[i]
             page_text = page.extract_text() or ""
             text += page_text + "\n"
+
+        if num_pages > use_pages:
+            st.warning(
+                f"PDF 페이지가 {num_pages}쪽이라서, 속도 문제를 피하기 위해 "
+                f"앞 {use_pages}쪽만 사용합니다."
+            )
+
         return text.strip()
+
     except Exception as e:
         st.error(f"PDF 텍스트를 읽는 중 오류가 발생했습니다: {e}")
         return ""
@@ -543,8 +566,12 @@ def main():
             st.error(f"'{student_name}({student_id})' 기준으로는 이미 {MAX_USES_PER_NAME}회 분석을 사용했습니다.")
         else:
             # 1) PDF 텍스트 추출
-            with st.spinner("PDF에서 텍스트를 추출하는 중입니다..."):
-                pdf_text = extract_text_from_pdf(uploaded_pdf)
+        with st.spinner("PDF에서 텍스트를 추출하는 중입니다..."):
+            pdf_text = extract_text_from_pdf(uploaded_pdf, max_pages=5)
+            if not pdf_text:
+                st.stop()
+            original_len = len(pdf_text)
+            st.caption(f"추출된 텍스트 길이: 약 {original_len}자")
                 if not pdf_text:
                     st.stop()
                 original_len = len(pdf_text)
