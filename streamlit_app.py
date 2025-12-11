@@ -791,14 +791,20 @@ def direct_input_workflow(student_name, student_id, track, major, openai_api_key
 def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-    # 상단 로고 (가운데 정렬)
-    if os.path.exists(SCHOOL_LOGO_FILE):
-        col_l, col_c, col_r = st.columns([1, 2, 1])
-        with col_c:
-            st.image(SCHOOL_LOGO_FILE, use_column_width=False)
-    # 제목
-    st.title(APP_TITLE)
-    st.caption("함창고 학생부 분석 & 활동 계획 보조 시스템 (내부용)")
+    # 상단 헤더: 왼쪽에 작은 로고, 오른쪽에 제목
+    col_logo, col_title = st.columns([0.15, 0.85])
+
+    with col_logo:
+        if os.path.exists(SCHOOL_LOGO_FILE):
+            # 제목 높이랑 비슷하게 보이도록 적당한 width 설정
+            st.image(SCHOOL_LOGO_FILE, width=70)
+        else:
+            st.empty()  # 로고 없으면 그냥 빈 칸
+
+    with col_title:
+        st.title(APP_TITLE)
+        st.caption("함창고 학생부 분석 & 활동 계획 보조 시스템 (내부용)")
+
 
     # 고정 푸터: 모든 화면 중앙 하단
     footer_html = """
