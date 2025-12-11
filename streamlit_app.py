@@ -791,19 +791,32 @@ def direct_input_workflow(student_name, student_id, track, major, openai_api_key
 def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-    # 상단 헤더: 왼쪽에 작은 로고, 오른쪽에 제목
-    col_logo, col_title = st.columns([0.15, 0.85])
+    # ===== 상단 헤더: 로고 + 제목을 한 줄에 촘촘하게 배치 =====
+    logo_col, title_col = st.columns([0.12, 0.88])
 
-    with col_logo:
+    with logo_col:
         if os.path.exists(SCHOOL_LOGO_FILE):
-            # 제목 높이랑 비슷하게 보이도록 적당한 width 설정
-            st.image(SCHOOL_LOGO_FILE, width=70)
+            # 제목 높이랑 비슷하게 보이도록 꽤 키움
+            st.image(SCHOOL_LOGO_FILE, width=110)
         else:
-            st.empty()  # 로고 없으면 그냥 빈 칸
+            st.empty()
 
-    with col_title:
-        st.title(APP_TITLE)
-        st.caption("함창고 학생부 분석 & 활동 계획 보조 시스템 (내부용)")
+    with title_col:
+        # st.title 대신 HTML로 마진을 줄여서 로고와 간격을 최소화
+        st.markdown(
+            f"""
+            <div style="display:flex; flex-direction:column; justify-content:center;">
+                <h1 style="margin-bottom:0.15rem; font-size:2.7rem;">
+                    {APP_TITLE}
+                </h1>
+                <p style="margin-top:0; color:#bbbbbb; font-size:0.95rem;">
+                    함창고 학생부 분석 &amp; 활동 계획 보조 시스템 (내부용)
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
 
 
     # 고정 푸터: 모든 화면 중앙 하단
