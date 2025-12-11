@@ -21,6 +21,7 @@ USAGE_LOG_FILE = "usage_log.json"
 MAX_USES_PER_NAME = 2
 KOREAN_FONT_FILE = "NANUMGOTHIC.TTF"  # 같은 폴더에 폰트 파일 넣어두기
 STUDENTS_FILE = "students.csv"  # 학번/이름 목록 CSV
+SCHOOL_LOGO_FILE = "school_logo.png"  # 학교 로고 이미지 파일 (같은 폴더)
 
 # gpt-5는 reasoning 토큰까지 이 안에서 같이 쓰기 때문에 넉넉하게 설정
 MAX_COMPLETION_TOKENS = 4000  # GPT가 생성하는 최대 토큰 수 (reasoning + 출력)
@@ -592,7 +593,7 @@ def call_gpt_plan(client, prompt: str):
 
 
 # =========================
-# PDF 생성 함수
+# PDF 생성 함수 (현재는 사용 X, 나중 확장용)
 # =========================
 
 def generate_pdf_from_text(title: str, text: str) -> bytes:
@@ -605,17 +606,11 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # 한글 폰트 필수: 실패하면 PDF를 생성하지 않고 에러를 알림
     try:
         pdf.add_font("KOREAN", "", KOREAN_FONT_FILE, uni=True)
         pdf.set_font("KOREAN", size=11)
-    except Exception as e:
-        st.error(
-            f"한글 폰트({KOREAN_FONT_FILE}) 로딩에 실패했습니다. "
-            "폰트 파일이 streamlit_app.py와 같은 폴더에 있는지, "
-            "파일명이 정확한지 확인해 주세요.\n\n"
-            f"원인: {e}"
-        )
+    except Exception:
+        # 현재 함수는 UI에서 사용하지 않지만, 혹시 모를 확장을 위해 남겨둠
         return b""
 
     def safe_text(s: str) -> str:
@@ -631,16 +626,11 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
             start += max_chars
         return chunks
 
-    # 제목
     pdf.set_font_size(14)
-    try:
-        pdf.multi_cell(0, 8, safe_text(title))
-    except FPDFException:
-        pdf.multi_cell(0, 8, safe_text(title[:40]))
+    pdf.multi_cell(0, 8, safe_text(title))
     pdf.ln(4)
     pdf.set_font_size(11)
 
-    # 본문
     for raw_line in text.split("\n"):
         for subline in split_long_line(raw_line, max_chars=80):
             line = safe_text(subline)
@@ -689,7 +679,6 @@ def direct_input_workflow(student_name, student_id, track, major, openai_api_key
 
     st.caption(f"현재 단계: {step} / 5  (1:창체 → 2:교과세특 → 3:교과학습 → 4:행동특성 → 5:개별요구사항)")
 
-    # 공통: 초기화 버튼
     if st.button("직접 입력 내용 전체 초기화", key="reset_direct"):
         st.session_state.direct_step = 1
         st.session_state.direct_inputs = {
@@ -754,7 +743,7 @@ def direct_input_workflow(student_name, student_id, track, major, openai_api_key
             "⑤ 개별 요구사항 (원하는 분석/활동, 고민, 지원 받고 싶은 부분)",
             value=inputs.get("custom", ""),
             height=200,
-            help="예: 수학·물리 쪽 진로에 맞춘 탐구 활동을 더 알고 싶어요 / 발표·글쓰기를 강화할 방법을 알고 싶어요 등"
+            help="예: 수학·물리 쪽 진로에 맞춘 탐구 활동 / 발표·글쓰기를 강화하고 싶어요 등"
         )
         inputs["custom"] = txt.strip()
         st.session_state.direct_inputs = inputs
@@ -801,8 +790,37 @@ def direct_input_workflow(student_name, student_id, track, major, openai_api_key
 
 def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
+
+    # 상단 로고 (가운데 정렬)
+    if os.path.exists(SCHOOL_LOGO_FILE):
+        col_l, col_c, col_r = st.columns([1, 2, 1])
+        with col_c:
+            st.image(SCHOOL_LOGO_FILE, use_column_width=False)
+    # 제목
     st.title(APP_TITLE)
     st.caption("함창고 학생부 분석 & 활동 계획 보조 시스템 (내부용)")
+
+    # 고정 푸터: 모든 화면 중앙 하단
+    footer_html = """
+    <style>
+    .footer-fixed {
+        position: fixed;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 0;
+        width: 100%;
+        text-align: center;
+        font-size: 12px;
+        color: #888888;
+        padding-bottom: 6px;
+        z-index: 100;
+    }
+    </style>
+    <div class="footer-fixed">
+        제작: 함창고등학교 박호종 교사
+    </div>
+    """
+    st.markdown(footer_html, unsafe_allow_html=True)
 
     # 세션 상태 초기화
     if "authenticated" not in st.session_state:
@@ -977,7 +995,7 @@ def main():
     # 5. 분석 결과 표시 (두 모드 공통)
     if st.session_state.analysis_data:
         analysis_data = st.session_state.analysis_data
-        st.subheader("5. 분석 결과")
+        st.subheader("4. 분석 결과")
 
         tabs = st.tabs(["종합 요약", "세부 영역 분석", "독서 활동", "추천 활동"])
 
@@ -1100,54 +1118,10 @@ def main():
                         st.session_state.plan_markdown = plan_markdown
                         st.success("실시 계획 및 예시 문구 생성 완료!")
 
-    # 6. 최종 결과 & PDF
-    if st.session_state.plan_markdown or st.session_state.analysis_data:
-        st.subheader("6. 최종 결과 및 PDF 다운로드")
-
-        analysis_text_block = ""
-        if st.session_state.analysis_data:
-            a = st.session_state.analysis_data
-            analysis_text_block += f"[학생 정보]\n이름: {a.get('basic_info', {}).get('name','')}\n"
-            analysis_text_block += f"희망 계열/학과: {a.get('basic_info', {}).get('track','')} / {a.get('basic_info', {}).get('major','')}\n\n"
-            analysis_text_block += "[종합 요약]\n"
-            analysis_text_block += a.get("analysis", {}).get("summary", "") + "\n\n"
-            analysis_text_block += "[강점]\n"
-            for s in a.get("analysis", {}).get("strengths", []):
-                analysis_text_block += f"- {s}\n"
-            analysis_text_block += "\n[보완 필요 영역]\n"
-            for w in a.get("analysis", {}).get("weaknesses", []):
-                analysis_text_block += f"- {w}\n"
-            analysis_text_block += "\n[핵심 키워드]\n"
-            analysis_text_block += ", ".join(a.get("analysis", {}).get("keywords", [])) + "\n\n"
-
-        plan_text_block = ""
-        if st.session_state.plan_markdown:
-            st.markdown("### 실시 계획 및 학생부 예시 문구 (미리보기)")
-            st.markdown(st.session_state.plan_markdown)
-            plan_text_block = st.session_state.plan_markdown
-
-        full_text_for_pdf = analysis_text_block + "\n\n" + plan_text_block
-
-        st.caption(f"PDF에 들어갈 텍스트 길이: {len(full_text_for_pdf.strip())}자")
-
-        if full_text_for_pdf.strip():
-            file_name = f"{student_name}_학생부분석.pdf" if 'student_name' in locals() and student_name else "학생부분석.pdf"
-            pdf_bytes = generate_pdf_from_text(
-                f"{student_name} 학생부 분석 및 활동 계획" if 'student_name' in locals() and student_name else "학생부 분석 및 활동 계획",
-                full_text_for_pdf,
-            )
-
-            if pdf_bytes:
-                st.download_button(
-                    label="결과 PDF 다운로드",
-                    data=pdf_bytes,
-                    file_name=file_name,
-                    mime="application/pdf",
-                )
-            else:
-                st.error("PDF 생성 중 오류가 발생하여 파일을 만들지 못했습니다. (폰트 설정을 확인해 주세요.)")
-        else:
-            st.info("분석 결과 또는 실시 계획이 있을 때 PDF로 다운로드할 수 있습니다.")
+    # 6. 실시 계획 미리보기 (PDF 다운로드는 제거)
+    if st.session_state.plan_markdown:
+        st.subheader("5. 실시 계획 및 학생부 예시 문구 (미리보기)")
+        st.markdown(st.session_state.plan_markdown)
 
 
 if __name__ == "__main__":
