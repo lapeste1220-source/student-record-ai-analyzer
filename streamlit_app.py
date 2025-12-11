@@ -22,7 +22,6 @@ MAX_USES_PER_NAME = 2
 KOREAN_FONT_FILE = "NANUMGOTHIC.TTF"  # 같은 폴더에 폰트 파일 넣어두기
 STUDENTS_FILE = "students.csv"  # 학번/이름 목록 CSV
 
-# 토큰 제한 (응답 길이만 제한 – 입력 길이는 전체 사용)
 # gpt-5는 reasoning 토큰까지 이 안에서 같이 쓰기 때문에 넉넉하게 설정
 MAX_COMPLETION_TOKENS = 4000  # GPT가 생성하는 최대 토큰 수 (reasoning + 출력)
 
@@ -112,7 +111,6 @@ def extract_text_from_pdf(uploaded_file) -> str:
     - 모든 페이지(1쪽~마지막쪽) 사용
     """
     try:
-        # UploadedFile → BytesIO
         uploaded_file.seek(0)
         data = uploaded_file.read()
         buffer = BytesIO(data)
@@ -226,6 +224,7 @@ JSON 형식 (중괄호 포함 전체를 JSON으로만 출력, 다른 설명 문�
   "suggested_activities": {{
     "strengths": [
       {{
+
         "id": "S1",
         "title": "강점을 더 강화할 수 있는 활동 이름",
         "description": "구체적인 활동 내용 (어떤 식으로 진행하면 좋은지)",
@@ -287,9 +286,14 @@ def call_gpt_analysis(client, prompt: str):
 
         # ```json ... ``` 같은 코드블록이면 안쪽만 꺼내기
         if text.startswith("```"):
-            end_fence = text.rfind("```")
-            if end_fence > 0:
-                text = text[end_fence:].strip("`")
+            lines = text.splitlines()
+            # 첫 줄이 ``` 로 시작하면 제거
+            if lines and lines[0].strip().startswith("```"):
+                lines = lines[1:]
+            # 마지막 줄이 ``` 로 시작하면 제거
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
 
         # 중괄호 구간만 추출
         start = text.find("{")
@@ -319,24 +323,21 @@ def call_gpt_analysis(client, prompt: str):
                 },
                 {"role": "user", "content": prompt},
             ],
-            # gpt-5: temperature 등은 미지원 → 사용 안 함
             max_completion_tokens=MAX_COMPLETION_TOKENS,
-            reasoning_effort="minimal",          # 추론 토큰 사용 줄이기
+            reasoning_effort="minimal",
             response_format={"type": "json_object"},
         )
 
         content = response.choices[0].message.content or ""
 
-        # 또다시 content가 비어 있으면, usage 정보를 같이 보여주고 종료
+        # content가 비어 있으면 메타데이터를 같이 보여주고 종료
         if not content.strip():
             st.error(
                 "GPT가 비어 있는 응답을 반환했습니다. "
-                "내부 추론(reasoning)에만 토큰을 모두 사용한 경우일 수 있습니다. "
-                "조금 있다가 다시 시도해 보거나, 필요하면 MAX_COMPLETION_TOKENS를 더 늘려 보세요."
+                "내부 추론(reasoning)에만 토큰을 모두 사용한 경우일 수 있습니다."
             )
             with st.expander("디버깅용: GPT 원본 응답 보기"):
                 try:
-                    # finish_reason / usage 등 핵심 메타데이터 출력
                     first_choice = response.choices[0]
                     st.text(f"finish_reason: {getattr(first_choice, 'finish_reason', None)}")
                     usage = getattr(response, "usage", None)
@@ -398,9 +399,8 @@ def build_plan_prompt(student_name, track, major, analysis_data, selected_activi
 
 {json.dumps(selected_activities, ensure_ascii=False, indent=2)}
 
-출력 형식은 마크다운 형태로 다음 구조를 따라라:
-
-# 활동별 실시 계획 및 학생부 예시 문구
+출력 형식은 마크다운 형태로 작성하되,
+**맨 위에 별도의 제목(# ... 형태)은 쓰지 말고** 바로 아래 형식으로 시작하라.
 
 ## 1. 활동 제목 예시
 - 활동 ID: S1 또는 W1과 같은 형태
@@ -432,7 +432,7 @@ def call_gpt_plan(client, prompt: str):
                 },
                 {"role": "user", "content": prompt},
             ],
-            reasoning_effort="minimal",   # 여기서도 추론 토큰 줄이기
+            reasoning_effort="minimal",
         )
         content = response.choices[0].message.content
         return content
@@ -455,34 +455,27 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    use_unicode_font = True
-
+    # 한글 폰트 필수: 실패하면 PDF를 생성하지 않고 에러를 알림
     try:
-        # 한글 폰트 사용 (파일명은 실제 업로드된 이름과 동일해야 함)
         pdf.add_font("KOREAN", "", KOREAN_FONT_FILE, uni=True)
         pdf.set_font("KOREAN", size=11)
-    except Exception:
-        # 폰트 로딩 실패 → 기본 폰트 + ASCII 필터링
-        use_unicode_font = False
-        st.warning(
-            f"한글 폰트 로딩에 실패했습니다. 폰트 파일({KOREAN_FONT_FILE})을 "
-            "앱 실행 디렉터리에 추가하면 한글이 정상 출력됩니다. "
-            "현재 PDF는 영어/숫자만 포함됩니다."
+    except Exception as e:
+        st.error(
+            f"한글 폰트({KOREAN_FONT_FILE}) 로딩에 실패했습니다. "
+            "폰트 파일이 streamlit_app.py와 같은 폴더에 있는지, "
+            "파일명이 정확한지 확인해 주세요.\n\n"
+            f"원인: {e}"
         )
-        pdf.set_font("Arial", size=11)
+        return b""
 
     def safe_text(s: str) -> str:
-        """유니코드 폰트를 못 쓸 때는 latin-1로 변환해서 한글 제거."""
-        if use_unicode_font:
-            return s.replace("\r", "")
-        return s.encode("latin-1", "ignore").decode("latin-1")
+        # fpdf 유니코드 폰트 사용 시에는 단순 개행 정리만
+        return s.replace("\r", "")
 
     # 너무 긴 한 줄(띄어쓰기 없는 문자열)을 강제로 잘라 주는 함수
     def split_long_line(line: str, max_chars: int = 80):
-        # 이미 공백이 있으면 fpdf가 알아서 잘라 주므로 그대로 사용
         if " " in line or len(line) <= max_chars:
             return [line]
-        # 공백이 거의 없으면 max_chars 단위로 강제 쪼개기
         chunks = []
         start = 0
         while start < len(line):
@@ -495,7 +488,6 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
     try:
         pdf.multi_cell(0, 8, safe_text(title))
     except FPDFException:
-        # 혹시 여기서도 문제가 나면 제목을 아주 짧게 잘라서라도 넣기
         pdf.multi_cell(0, 8, safe_text(title[:40]))
     pdf.ln(4)
     pdf.set_font_size(11)
@@ -507,24 +499,20 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
             try:
                 pdf.multi_cell(0, 6, line)
             except FPDFException:
-                # 그래도 안 되면 더 잘라서라도 넣고 넘어간다
+                # 너무 긴 줄 등으로 또 오류가 나면 더 잘라서 시도
                 try:
                     pdf.multi_cell(0, 6, line[:40])
                 except FPDFException:
-                    # 이 줄은 포기하고 다음 줄로
                     continue
 
     # bytes로 반환 (fpdf / fpdf2 모두 대응)
     result = pdf.output(dest="S")
     if isinstance(result, str):
-        # 옛날 fpdf처럼 str을 반환하는 경우
         pdf_bytes = result.encode("latin1")
     else:
-        # fpdf2처럼 bytearray / bytes를 반환하는 경우
         pdf_bytes = bytes(result)
 
     return pdf_bytes
-
 
 
 # =========================
@@ -654,7 +642,6 @@ def main():
     # 학생부 분석 실행
     st.subheader("4. 학생부 분석 실행")
 
-    # 학번+이름을 합친 key로 사용 횟수 관리
     usage_key = f"{student_id}_{student_name}" if 'student_id' in locals() and student_id and student_name else ""
 
     if student_name:
@@ -853,6 +840,9 @@ def main():
 
         full_text_for_pdf = analysis_text_block + "\n\n" + plan_text_block
 
+        # 디버깅용: PDF에 실제로 들어가는 텍스트 길이 표시
+        st.caption(f"PDF에 들어갈 텍스트 길이: {len(full_text_for_pdf.strip())}자")
+
         if full_text_for_pdf.strip():
             file_name = f"{student_name}_학생부분석.pdf" if 'student_name' in locals() and student_name else "학생부분석.pdf"
             pdf_bytes = generate_pdf_from_text(
@@ -860,12 +850,15 @@ def main():
                 full_text_for_pdf,
             )
 
-            st.download_button(
-                label="결과 PDF 다운로드",
-                data=pdf_bytes,
-                file_name=file_name,
-                mime="application/pdf",
-            )
+            if pdf_bytes:
+                st.download_button(
+                    label="결과 PDF 다운로드",
+                    data=pdf_bytes,
+                    file_name=file_name,
+                    mime="application/pdf",
+                )
+            else:
+                st.error("PDF 생성 중 오류가 발생하여 파일을 만들지 못했습니다. (폰트 설정을 확인해 주세요.)")
         else:
             st.info("분석 결과 또는 실시 계획이 있을 때 PDF로 다운로드할 수 있습니다.")
 
