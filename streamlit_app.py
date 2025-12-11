@@ -151,7 +151,7 @@ def get_openai_client(api_key: str):
 
 
 # =========================
-# GPT 분석 프롬프트
+# GPT 분석 프롬프트 (PDF 기반)
 # =========================
 
 def build_analysis_prompt(student_name, track, major, pdf_text):
@@ -224,7 +224,6 @@ JSON 형식 (중괄호 포함 전체를 JSON으로만 출력, 다른 설명 문�
   "suggested_activities": {{
     "strengths": [
       {{
-
         "id": "S1",
         "title": "강점을 더 강화할 수 있는 활동 이름",
         "description": "구체적인 활동 내용 (어떤 식으로 진행하면 좋은지)",
@@ -277,6 +276,163 @@ JSON 형식 (중괄호 포함 전체를 JSON으로만 출력, 다른 설명 문�
     return prompt
 
 
+# =========================
+# GPT 분석 프롬프트 (직접 입력 기반)
+# =========================
+
+def build_manual_input_prompt(student_name, track, major, inputs):
+    """
+    학생이 직접 입력한 핵심 활동 텍스트를 기반으로 분석 프롬프트 생성.
+    inputs: {
+      "creative": 창체,
+      "subject_detail": 교과세특,
+      "academic": 교과학습발달상황,
+      "behavior": 행동특성 및 종합의견,
+      "custom": 개별요구사항
+    }
+    """
+    creative = inputs.get("creative", "")
+    subject_detail = inputs.get("subject_detail", "")
+    academic = inputs.get("academic", "")
+    behavior = inputs.get("behavior", "")
+    custom = inputs.get("custom", "")
+
+    core_text = f"""
+[창의적체험활동]
+{creative}
+
+[교과세부능력특기사항]
+{subject_detail}
+
+[교과학습발달상황]
+{academic}
+
+[행동특성 및 종합의견]
+{behavior}
+""".strip()
+
+    prompt = f"""
+너는 대한민국 고등학교 담임교사이자 진로진학부 교사의 입장에서,
+아래 학생의 학교생활기록부 핵심 내용을 학생부 종합전형 관점에서 분석하는 역할을 맡고 있다.
+
+학생 기본 정보:
+- 이름: {student_name}
+- 희망계열 및 학과: {track} / {major}
+
+아래 텍스트는 학생이 자신의 학교생활기록부에서 **중요하다고 생각하는 부분만 골라서 요약하여 직접 입력한 내용**이다.
+실제 학생부 전체가 아니라 핵심 요약이므로, 과도하게 지어내지 말고,
+제공된 정보 안에서 합리적으로 추론할 수 있는 범위까지만 해석하라.
+
+또한, 학생이 따로 적은 '개별 요구사항'을 분석에 적극 반영하라.
+개별 요구사항:
+------------------
+{custom}
+------------------
+
+아래 핵심 텍스트를 토대로, PDF 기반 분석과 동일한 JSON 구조로 결과를 작성하라.
+
+JSON 형식은 다음과 같다(구조를 그대로 사용하되 내용만 채울 것. JSON 외의 설명 문장은 금지):
+
+{{
+  "basic_info": {{
+    "name": "{student_name}",
+    "track": "{track}",
+    "major": "{major}"
+  }},
+  "sections": {{
+    "creative_activities": "창의적체험활동 관련 핵심 내용 요약 (문단 형태, 5~10문장)",
+    "academic_performance": "교과세특과 교과학습발달상황을 통합한 학업 관련 핵심 내용 요약 (문단 형태, 5~10문장)",
+    "behavior": "행동특성 및 종합의견 핵심 내용 요약 (문단 형태, 3~6문장)",
+    "reading": {{
+      "raw_list": [
+        {{
+          "title": "도서명 1",
+          "author": "저자(알 수 없으면 빈 문자열)",
+          "related_subject": "관련 교과/진로 (추론 가능하면)",
+          "comment": "이 학생에게서 보이는 독서 특징 혹은 해당 도서의 역할"
+        }}
+      ],
+      "overall_comment": "독서 활동 전반에 대한 평가와 특징 (3~6문장, 실제 입력이 없으면 합리적 추론으로 작성하되 '추론'임을 간접적으로 드러낼 것)"
+    }}
+  }},
+  "analysis": {{
+    "summary": "학생 전체 학교생활의 특징과 종합 평가 (5~8문장, 개별 요구사항을 반영하여 서술)",
+    "strengths": [
+      "학생의 강점 1",
+      "학생의 강점 2",
+      "학생의 강점 3"
+    ],
+    "weaknesses": [
+      "학생의 보완 필요 영역 1",
+      "학생의 보완 필요 영역 2"
+    ],
+    "keywords": [
+      "핵심 키워드 1",
+      "핵심 키워드 2",
+      "핵심 키워드 3",
+      "핵심 키워드 4",
+      "핵심 키워드 5"
+    ]
+  }},
+  "suggested_activities": {{
+    "strengths": [
+      {{
+        "id": "S1",
+        "title": "강점을 더 강화할 수 있는 활동 이름",
+        "description": "구체적인 활동 내용 (어떤 식으로 진행하면 좋은지)",
+        "reason": "이 활동이 해당 학생에게 적절한 이유 (개별 요구사항과 연결)",
+        "expected_record_impact": "학생부에 어느 영역에 어떤 표현으로 반영될 수 있을지 개략 설명"
+      }}
+    ],
+    "weaknesses": [
+      {{
+        "id": "W1",
+        "title": "약점을 보완할 수 있는 활동 이름",
+        "description": "구체적인 활동 내용",
+        "reason": "이 활동이 해당 학생에게 적절한 이유 (개별 요구사항과 연결)",
+        "expected_record_impact": "학생부에 기대되는 변화 방향"
+      }}
+    ]
+  }},
+  "reading_enrichment": {{
+    "core_summaries": [
+      {{
+        "title": "기존 독서 도서명 예시",
+        "summary": "해당 도서의 핵심 내용 요약 및 학생 진로와의 연결 (3~5문장)"
+      }}
+    ],
+    "related_books": [
+      {{
+        "title": "연계 추천 도서 1",
+        "reason": "왜 이 책을 읽으면 도움이 되는지 (3~4문장, 개별 요구사항을 반영)"
+      }},
+      {{
+        "title": "연계 추천 도서 2",
+        "reason": "연계성 및 기대 효과"
+      }}
+    ]
+  }}
+}}
+
+주의사항:
+- 반드시 위 JSON 구조를 그대로 사용하되, 내용은 구체적으로 채워라.
+- JSON 바깥에 다른 문장을 절대 쓰지 말 것.
+- null 대신 빈 문자열 ""을 사용해라.
+- 실제로 입력되지 않은 정보는 과도하게 꾸며내지 말고, 필요한 경우 '추론한 내용'임이 간접적으로 드러나게 표현하라.
+
+아래는 학생이 직접 입력한 핵심 텍스트이다:
+
+------------------핵심 텍스트 시작------------------
+{core_text}
+------------------핵심 텍스트 끝------------------
+"""
+    return prompt
+
+
+# =========================
+# GPT 호출 공통 (JSON 파싱)
+# =========================
+
 def call_gpt_analysis(client, prompt: str):
     """학생부 분석 API 호출 (JSON 응답 기대)."""
 
@@ -287,10 +443,8 @@ def call_gpt_analysis(client, prompt: str):
         # ```json ... ``` 같은 코드블록이면 안쪽만 꺼내기
         if text.startswith("```"):
             lines = text.splitlines()
-            # 첫 줄이 ``` 로 시작하면 제거
             if lines and lines[0].strip().startswith("```"):
                 lines = lines[1:]
-            # 마지막 줄이 ``` 로 시작하면 제거
             if lines and lines[-1].strip().startswith("```"):
                 lines = lines[:-1]
             text = "\n".join(lines).strip()
@@ -315,7 +469,7 @@ def call_gpt_analysis(client, prompt: str):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-5",  # 선생님 계정에서 사용 가능한 모델명
+            model="gpt-5",
             messages=[
                 {
                     "role": "system",
@@ -330,7 +484,6 @@ def call_gpt_analysis(client, prompt: str):
 
         content = response.choices[0].message.content or ""
 
-        # content가 비어 있으면 메타데이터를 같이 보여주고 종료
         if not content.strip():
             st.error(
                 "GPT가 비어 있는 응답을 반환했습니다. "
@@ -369,9 +522,6 @@ def call_gpt_analysis(client, prompt: str):
 # =========================
 
 def build_plan_prompt(student_name, track, major, analysis_data, selected_activities):
-    """
-    선택한 추천 활동을 바탕으로 실시 계획 + 학생부 예시 문구 요청 프롬프트.
-    """
     strengths = analysis_data.get("analysis", {}).get("strengths", [])
     weaknesses = analysis_data.get("analysis", {}).get("weaknesses", [])
     keywords = analysis_data.get("analysis", {}).get("keywords", [])
@@ -442,7 +592,7 @@ def call_gpt_plan(client, prompt: str):
 
 
 # =========================
-# PDF 생성 함수 (fpdf2 사용)
+# PDF 생성 함수
 # =========================
 
 def generate_pdf_from_text(title: str, text: str) -> bytes:
@@ -469,10 +619,8 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
         return b""
 
     def safe_text(s: str) -> str:
-        # fpdf 유니코드 폰트 사용 시에는 단순 개행 정리만
         return s.replace("\r", "")
 
-    # 너무 긴 한 줄(띄어쓰기 없는 문자열)을 강제로 잘라 주는 함수
     def split_long_line(line: str, max_chars: int = 80):
         if " " in line or len(line) <= max_chars:
             return [line]
@@ -499,13 +647,11 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
             try:
                 pdf.multi_cell(0, 6, line)
             except FPDFException:
-                # 너무 긴 줄 등으로 또 오류가 나면 더 잘라서 시도
                 try:
                     pdf.multi_cell(0, 6, line[:40])
                 except FPDFException:
                     continue
 
-    # bytes로 반환 (fpdf / fpdf2 모두 대응)
     result = pdf.output(dest="S")
     if isinstance(result, str):
         pdf_bytes = result.encode("latin1")
@@ -513,6 +659,140 @@ def generate_pdf_from_text(title: str, text: str) -> bytes:
         pdf_bytes = bytes(result)
 
     return pdf_bytes
+
+
+# =========================
+# 직접 입력 모드 UI
+# =========================
+
+def direct_input_workflow(student_name, student_id, track, major, openai_api_key, usage_key):
+    st.subheader("4-2. 중요 활동 직접 입력 후 분석")
+
+    if not student_name:
+        st.warning("먼저 상단에서 학번/이름을 선택해 주세요.")
+        return
+    if not openai_api_key:
+        st.warning("GPT API 키가 설정되어야 분석을 실행할 수 있습니다.")
+    if "direct_step" not in st.session_state:
+        st.session_state.direct_step = 1
+    if "direct_inputs" not in st.session_state:
+        st.session_state.direct_inputs = {
+            "creative": "",
+            "subject_detail": "",
+            "academic": "",
+            "behavior": "",
+            "custom": "",
+        }
+
+    step = st.session_state.direct_step
+    inputs = st.session_state.direct_inputs
+
+    st.caption(f"현재 단계: {step} / 5  (1:창체 → 2:교과세특 → 3:교과학습 → 4:행동특성 → 5:개별요구사항)")
+
+    # 공통: 초기화 버튼
+    if st.button("직접 입력 내용 전체 초기화", key="reset_direct"):
+        st.session_state.direct_step = 1
+        st.session_state.direct_inputs = {
+            "creative": "",
+            "subject_detail": "",
+            "academic": "",
+            "behavior": "",
+            "custom": "",
+        }
+        st.experimental_rerun()
+
+    if step == 1:
+        txt = st.text_area(
+            "① 창의적체험활동 (핵심 활동 위주로 입력)",
+            value=inputs.get("creative", ""),
+            height=200,
+            help="동아리, 자율·진로·봉사 활동 등 중에서 진로와 연결되는 핵심 내용만 적어 주세요."
+        )
+        if st.button("저장 후 다음 (② 교과세특)", key="step1_next"):
+            inputs["creative"] = txt.strip()
+            st.session_state.direct_step = 2
+            st.session_state.direct_inputs = inputs
+
+    elif step == 2:
+        txt = st.text_area(
+            "② 교과세부능력특기사항 (주요 과목 위주)",
+            value=inputs.get("subject_detail", ""),
+            height=230,
+            help="진로와 관련된 과목 위주로, 인상적인 활동·과제·발표 등을 정리해 주세요."
+        )
+        if st.button("저장 후 다음 (③ 교과학습발달상황)", key="step2_next"):
+            inputs["subject_detail"] = txt.strip()
+            st.session_state.direct_step = 3
+            st.session_state.direct_inputs = inputs
+
+    elif step == 3:
+        txt = st.text_area(
+            "③ 교과학습발달상황 (성취도, 학습 태도 등)",
+            value=inputs.get("academic", ""),
+            height=230,
+            help="전반적인 성취도 변화, 학습 태도, 탐구·과제 수행 과정 등을 적어 주세요."
+        )
+        if st.button("저장 후 다음 (④ 행동특성 및 종합의견)", key="step3_next"):
+            inputs["academic"] = txt.strip()
+            st.session_state.direct_step = 4
+            st.session_state.direct_inputs = inputs
+
+    elif step == 4:
+        txt = st.text_area(
+            "④ 행동특성 및 종합의견 (선생님이 적어주신 내용 요약)",
+            value=inputs.get("behavior", ""),
+            height=200,
+            help="담임 및 교과 선생님이 적어주신 종합 의견 중 핵심만 정리해 주세요."
+        )
+        if st.button("저장 후 다음 (⑤ 개별 요구사항)", key="step4_next"):
+            inputs["behavior"] = txt.strip()
+            st.session_state.direct_step = 5
+            st.session_state.direct_inputs = inputs
+
+    elif step == 5:
+        txt = st.text_area(
+            "⑤ 개별 요구사항 (원하는 분석/활동, 고민, 지원 받고 싶은 부분)",
+            value=inputs.get("custom", ""),
+            height=200,
+            help="예: 수학·물리 쪽 진로에 맞춘 탐구 활동을 더 알고 싶어요 / 발표·글쓰기를 강화할 방법을 알고 싶어요 등"
+        )
+        inputs["custom"] = txt.strip()
+        st.session_state.direct_inputs = inputs
+
+        st.markdown("---")
+        st.markdown("### 입력 내용 요약 (검토용)")
+        st.markdown(f"**창체 요약**\n\n{inputs.get('creative','')}")
+        st.markdown(f"**교과세특 요약**\n\n{inputs.get('subject_detail','')}")
+        st.markdown(f"**교과학습발달상황 요약**\n\n{inputs.get('academic','')}")
+        st.markdown(f"**행동특성 및 종합의견 요약**\n\n{inputs.get('behavior','')}")
+        st.markdown(f"**개별 요구사항**\n\n{inputs.get('custom','')}")
+
+        st.markdown("---")
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("입력 내용만 저장 (다시 수정 가능)", key="save_only"):
+                st.success("입력 내용이 임시 저장되었습니다. 필요하면 위 내용을 수정한 뒤 다시 분석을 실행할 수 있습니다.")
+        with col_b:
+            if st.button("직접 입력 내용으로 학생부 분석 실행", key="manual_analyze"):
+                if not openai_api_key:
+                    st.error("유효한 OpenAI API 키가 설정되어 있지 않습니다.")
+                    return
+                if not can_use_analysis(usage_key):
+                    st.error(f"'{student_name}({student_id})' 기준으로는 이미 {MAX_USES_PER_NAME}회 분석을 사용했습니다.")
+                    return
+
+                client = get_openai_client(openai_api_key)
+                if client is None:
+                    return
+                with st.spinner("직접 입력한 내용을 바탕으로 학생부를 분석하는 중입니다..."):
+                    prompt = build_manual_input_prompt(student_name, track, major, inputs)
+                    analysis_data = call_gpt_analysis(client, prompt)
+
+                if analysis_data:
+                    st.session_state.analysis_data = analysis_data
+                    increase_usage(usage_key)
+                    st.success("직접 입력 기반 학생부 분석이 완료되었습니다.")
 
 
 # =========================
@@ -544,7 +824,7 @@ def main():
                 st.error("비밀번호가 올바르지 않습니다.")
         st.stop()
 
-    # 메인 UI
+    # 메인 안내
     st.info(
         """
         ⚠️ 이 시스템은 교사용 내부 도구입니다.
@@ -555,14 +835,13 @@ def main():
         """
     )
 
-    # 기초 정보 입력
+    # 1. 기초 정보
     st.subheader("1. 기초 정보 입력")
 
     students = load_students()
 
     col1, col2, col3 = st.columns(3)
 
-    # 학번/이름 선택
     with col1:
         if not students:
             st.error("students.csv 파일에서 학생 목록을 불러오지 못했습니다. 학번,이름 형식으로 CSV를 만들어 주세요.")
@@ -586,15 +865,8 @@ def main():
     with col3:
         major = st.text_input("희망 학과 (예: 기계공학과, 국어교육과 등)")
 
-    # PDF 업로드
-    st.subheader("2. 학교생활기록부 PDF 업로드")
-    uploaded_pdf = st.file_uploader("학교생활기록부 PDF 파일을 업로드하세요.", type=["pdf"])
-
-    if uploaded_pdf is not None:
-        st.success("PDF 업로드 완료")
-
-    # API 사용 설정
-    st.subheader("3. GPT API 사용 설정")
+    # 2. GPT API 설정
+    st.subheader("2. GPT API 사용 설정")
 
     api_mode = st.radio(
         "API 사용 방식 선택",
@@ -639,54 +911,70 @@ def main():
     if openai_api_key is None:
         st.warning("⚠️ 아직 유효한 API 키가 설정되지 않았습니다.")
 
-    # 학생부 분석 실행
-    st.subheader("4. 학생부 분석 실행")
-
+    # 이름·학번 기준 사용 횟수
     usage_key = f"{student_id}_{student_name}" if 'student_id' in locals() and student_id and student_name else ""
-
     if student_name:
         used_count = get_usage_count(usage_key)
         st.caption(f"현재 '{student_name}({student_id})' 기준 분석 실행 횟수: {used_count} / {MAX_USES_PER_NAME}")
 
-    analyze_clicked = st.button("학생부 분석 실행")
+    # 3. 분석 방식 선택
+    st.subheader("3. 분석 방식 선택")
+    analysis_mode = st.radio(
+        "원하는 분석 방식을 선택하세요.",
+        ["PDF 업로드로 전체 자동 분석", "중요 활동만 직접 입력 후 분석"],
+        horizontal=True,
+    )
 
-    if analyze_clicked:
-        if not student_name:
-            st.error("학생 성명/학번을 선택해 주세요.")
-        elif not uploaded_pdf:
-            st.error("학교생활기록부 PDF 파일을 업로드해 주세요.")
-        elif not openai_api_key:
-            st.error("유효한 OpenAI API 키가 설정되어 있지 않습니다.")
-        elif not can_use_analysis(usage_key):
-            st.error(f"'{student_name}({student_id})' 기준으로는 이미 {MAX_USES_PER_NAME}회 분석을 사용했습니다.")
-        else:
-            # 1) PDF 텍스트 추출 (모든 페이지 사용)
-            with st.spinner("PDF에서 텍스트를 추출하는 중입니다..."):
-                pdf_text = extract_text_from_pdf(uploaded_pdf)
-                if not pdf_text:
-                    st.error(
-                        "PDF에서 추출할 수 있는 텍스트가 없습니다. "
-                        "이미지(스캔) 형태의 학생부일 수 있습니다.\n"
-                        "글자 선택이 가능한 텍스트 기반 PDF로 다시 업로드해 주세요."
-                    )
+    # 4-1. PDF 업로드 분석 모드
+    if analysis_mode == "PDF 업로드로 전체 자동 분석":
+        st.subheader("4-1. 학교생활기록부 PDF 업로드 및 분석 실행")
+
+        uploaded_pdf = st.file_uploader("학교생활기록부 PDF 파일을 업로드하세요.", type=["pdf"])
+
+        if uploaded_pdf is not None:
+            st.success("PDF 업로드 완료")
+
+        analyze_clicked = st.button("PDF로 학생부 분석 실행")
+
+        if analyze_clicked:
+            if not student_name:
+                st.error("학생 성명/학번을 선택해 주세요.")
+            elif not uploaded_pdf:
+                st.error("학교생활기록부 PDF 파일을 업로드해 주세요.")
+            elif not openai_api_key:
+                st.error("유효한 OpenAI API 키가 설정되어 있지 않습니다.")
+            elif not can_use_analysis(usage_key):
+                st.error(f"'{student_name}({student_id})' 기준으로는 이미 {MAX_USES_PER_NAME}회 분석을 사용했습니다.")
+            else:
+                with st.spinner("PDF에서 텍스트를 추출하는 중입니다..."):
+                    pdf_text = extract_text_from_pdf(uploaded_pdf)
+                    if not pdf_text:
+                        st.error(
+                            "PDF에서 추출할 수 있는 텍스트가 없습니다. "
+                            "이미지(스캔) 형태의 학생부일 수 있습니다.\n"
+                            "글자 선택이 가능한 텍스트 기반 PDF로 다시 업로드해 주세요."
+                        )
+                        st.stop()
+                    original_len = len(pdf_text)
+                    st.caption(f"추출된 텍스트 길이: 약 {original_len}자")
+
+                client = get_openai_client(openai_api_key)
+                if client is None:
                     st.stop()
-                original_len = len(pdf_text)
-                st.caption(f"추출된 텍스트 길이: 약 {original_len}자")
+                with st.spinner("GPT로 학생부를 분석하는 중입니다..."):
+                    prompt = build_analysis_prompt(student_name, track, major, pdf_text)
+                    analysis_data = call_gpt_analysis(client, prompt)
 
-            # 2) GPT 분석
-            client = get_openai_client(openai_api_key)
-            if client is None:
-                st.stop()
-            with st.spinner("GPT로 학생부를 분석하는 중입니다..."):
-                prompt = build_analysis_prompt(student_name, track, major, pdf_text)
-                analysis_data = call_gpt_analysis(client, prompt)
+                if analysis_data:
+                    st.session_state.analysis_data = analysis_data
+                    increase_usage(usage_key)
+                    st.success("학생부 분석이 완료되었습니다.")
 
-            if analysis_data:
-                st.session_state.analysis_data = analysis_data
-                increase_usage(usage_key)
-                st.success("학생부 분석이 완료되었습니다.")
+    # 4-2. 직접 입력 분석 모드
+    else:
+        direct_input_workflow(student_name, student_id, track, major, openai_api_key, usage_key)
 
-    # 분석 결과 표시
+    # 5. 분석 결과 표시 (두 모드 공통)
     if st.session_state.analysis_data:
         analysis_data = st.session_state.analysis_data
         st.subheader("5. 분석 결과")
@@ -717,7 +1005,7 @@ def main():
             st.markdown("### 창의적체험활동")
             st.write(analysis_data.get("sections", {}).get("creative_activities", ""))
 
-            st.markdown("### 교과학습발달상황")
+            st.markdown("### 교과학습발달상황 / 교과세특")
             st.write(analysis_data.get("sections", {}).get("academic_performance", ""))
 
             st.markdown("### 행동특성 및 종합의견")
@@ -812,7 +1100,7 @@ def main():
                         st.session_state.plan_markdown = plan_markdown
                         st.success("실시 계획 및 예시 문구 생성 완료!")
 
-    # 실시 계획 / 예시 문구 결과 표시 & PDF 생성
+    # 6. 최종 결과 & PDF
     if st.session_state.plan_markdown or st.session_state.analysis_data:
         st.subheader("6. 최종 결과 및 PDF 다운로드")
 
@@ -840,7 +1128,6 @@ def main():
 
         full_text_for_pdf = analysis_text_block + "\n\n" + plan_text_block
 
-        # 디버깅용: PDF에 실제로 들어가는 텍스트 길이 표시
         st.caption(f"PDF에 들어갈 텍스트 길이: {len(full_text_for_pdf.strip())}자")
 
         if full_text_for_pdf.strip():
